@@ -1,0 +1,7 @@
+<launch>
+  <include file="$(find nav_demos)/launch/includes/map_server.launch.xml"/>
+  
+  <include file="$(find nav_demos)/launch/includes/amcl_localization.launch.xml"/>
+  <include file="$(find nav_demos)/launch/includes/move_base.launch.xml"/>
+  
+</launch>

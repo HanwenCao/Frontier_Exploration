@@ -1,0 +1,3 @@
+<launch>
+  <node name="map" pkg="map_server" type="map_server" args="$(find nav_demos)/maps/fourth_floor_gazebo.yaml" required="true"/>
+</launch>

@@ -1,0 +1,7 @@
+<launch>
+
+  <include file="$(find turtlebot_navigation)/launch/includes/move_base.launch.xml">
+    <arg name="custom_param_file" value="$(find nav_demos)/param/allow_unknown.yaml"/>
+  </include>
+
+</launch>

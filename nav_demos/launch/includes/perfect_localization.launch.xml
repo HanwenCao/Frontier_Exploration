@@ -1,0 +1,3 @@
+<launch>
+  <node name="perfect_localization" pkg="gazebo_fake_localization" type="gazebo_fake_localization" required="true"/>
+</launch>

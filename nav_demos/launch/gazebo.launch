@@ -1,0 +1,102 @@
+<launch>
+  <arg name="world_file" default="$(find nav_demos)/worlds/fourth_floor.world"/>
+  <arg name="gui" default="true"/>
+
+
+  <!--BEGIN turtlebot_gazebo turtlebot_world.launch -->
+
+
+    <arg name="base"      value="$(optenv TURTLEBOT_BASE kobuki)"/> <!-- create, roomba -->
+    <arg name="battery"   value="$(optenv TURTLEBOT_BATTERY /proc/acpi/battery/BAT0)"/>  <!-- /proc/acpi/battery/BAT0 --> 
+
+    <arg name="stacks"    value="$(optenv TURTLEBOT_STACKS hexagons)"/>  <!-- circles, hexagons --> 
+    <arg name="3d_sensor" value="$(optenv TURTLEBOT_3D_SENSOR kinect)"/>  <!-- kinect, asus_xtion_pro --> 
+
+
+    <!--BEGIN gazebo_ros empty_world.launch-->
+      <!-- these are the arguments you can pass this launch file, for example paused:=true -->
+      <arg name="paused" default="false"/>
+      <arg name="use_sim_time" default="true"/>
+      <arg name="extra_gazebo_args" default=""/>
+      <arg name="recording" default="false"/>
+      <!-- Note that 'headless' is currently non-functional.  See gazebo_ros_pkgs issue #491 (-r arg does not disable
+           rendering, but instead enables recording). The arg definition has been left here to prevent breaking downstream
+           launch files, but it does nothing. -->
+      <arg name="headless" default="false"/>
+      <arg name="debug" default="false"/>
+      <arg name="physics" default="ode"/>
+      <arg name="verbose" default="false"/>
+      <arg name="respawn_gazebo" default="false"/>
+      <arg name="use_clock_frequency" default="false"/>
+      <arg name="pub_clock_frequency" default="100"/>
+
+      <!-- set use_sim_time flag -->
+      <group if="$(arg use_sim_time)">
+        <param name="/use_sim_time" value="true" />
+      </group>
+
+      <!-- set command arguments -->
+      <arg unless="$(arg paused)" name="command_arg1" value=""/>
+      <arg     if="$(arg paused)" name="command_arg1" value="-u"/>
+      <arg unless="$(arg recording)" name="command_arg2" value=""/>
+      <arg     if="$(arg recording)" name="command_arg2" value="-r"/>
+      <arg unless="$(arg verbose)" name="command_arg3" value=""/>
+      <arg     if="$(arg verbose)" name="command_arg3" value="--verbose"/>
+      <arg unless="$(arg debug)" name="script_type" value="gzserver"/>
+      <arg     if="$(arg debug)" name="script_type" value="debug"/>
+
+      <!-- start gazebo server-->
+      <group if="$(arg use_clock_frequency)">
+        <param name="gazebo/pub_clock_frequency" value="$(arg pub_clock_frequency)" />
+      </group>
+      <node name="gazebo" pkg="gazebo_ros" type="$(arg script_type)" respawn="$(arg respawn_gazebo)" output="screen"
+	    args="$(arg command_arg1) $(arg command_arg2) $(arg command_arg3) -e $(arg physics) $(arg extra_gazebo_args) $(arg world_file)" required="true"/>
+	
+      <!-- start gazebo client -->
+      <group if="$(arg gui)">
+        <node name="gazebo_gui" pkg="gazebo_ros" type="gzclient" respawn="false" output="screen"/>
+      </group>
+
+    <!--END gazebo_ros empty_world.launch-->
+
+    <!--BEGIN turtlebot_gazebo kobuki.launch.xml-->
+      <arg name="urdf_file" default="$(find xacro)/xacro.py '$(find turtlebot_description)/robots/$(arg base)_$(arg stacks)_$(arg 3d_sensor).urdf.xacro'" />
+      <param name="robot_description" command="$(arg urdf_file)" />
+      
+      <!-- Gazebo model spawner -->
+      <node name="spawn_turtlebot_model" pkg="gazebo_ros" type="spawn_model"
+            args="-x 33 -y -1.5 -unpause -urdf -param robot_description -model mobile_base"/>
+      
+      <!-- Velocity muxer -->
+      <node pkg="nodelet" type="nodelet" name="mobile_base_nodelet_manager" args="manager"  required="true"/>
+      <node pkg="nodelet" type="nodelet" name="cmd_vel_mux"
+            args="load yocs_cmd_vel_mux/CmdVelMuxNodelet mobile_base_nodelet_manager"  required="true">
+        <param name="yaml_cfg_file" value="$(find turtlebot_bringup)/param/mux.yaml" />
+        <remap from="cmd_vel_mux/output" to="mobile_base/commands/velocity"/>
+      </node>
+
+      <!-- Bumper/cliff to pointcloud (not working, as it needs sensors/core messages) -->
+      <include file="$(find turtlebot_bringup)/launch/includes/kobuki/bumper2pc.launch.xml"/>
+
+    <!--END turtlebot_gazebo kobuki.launch.xml-->
+
+
+    
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"  required="true">
+      <param name="publish_frequency" type="double" value="30.0" />
+    </node>
+    
+    <!-- Fake laser -->
+    <node pkg="nodelet" type="nodelet" name="laserscan_nodelet_manager" args="manager"  required="true"/>
+    <node pkg="nodelet" type="nodelet" name="depthimage_to_laserscan"
+          args="load depthimage_to_laserscan/DepthImageToLaserScanNodelet laserscan_nodelet_manager"  required="true">
+      <param name="scan_height" value="10"/>
+      <param name="output_frame_id" value="/camera_depth_frame"/>
+      <param name="range_min" value="0.45"/>
+      <remap from="image" to="/camera/depth/image_raw"/>
+      <remap from="scan" to="/scan"/>
+    </node>
+
+  <!--END turtlebot_gazebo turtlebot_world.launch -->
+
+</launch>
