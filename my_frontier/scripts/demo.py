@@ -5,7 +5,6 @@ from nav_msgs.msg import OccupancyGrid, MapMetaData, Odometry
 from std_msgs.msg import String
 import std_msgs.msg as std_msgs
 import std_srvs.srv as std_srvs
-import numpy as np
 import cv2
 import tf.transformations as transformations
 import math
@@ -23,7 +22,6 @@ import tf
 from actionlib_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
 from kobuki_msgs.msg import BumperEvent, WheelDropEvent
-import math
 import math
 import numpy as np
 #import dippykit as dip
@@ -166,7 +164,7 @@ class DemoResetter():
             if not self.stop:
 
                 try:
-                    #self.Rotate()
+                    self.Rotate()
                     next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])
                    
                         
@@ -263,17 +261,13 @@ class DemoResetter():
 
 
 
-    def process_test(self, info, grid, odom):
-        next_goal = odom
-        next_goal[0] = next_goal[0]+0.2
-        next_goal[1] = next_goal[1]+0.2
-        return next_goal
+   
 
 
 
     def process(self, info, grid, odom):
 
-
+        
         print "processing!"
         resolution = info[3]
 
@@ -303,18 +297,14 @@ class DemoResetter():
 
         thresh_high = 10
 
-        dst = ((grid <= thresh_high) & (grid >= thresh_low)) * 1.0  # threshold
-        dst_open = dst
-        #np.savetxt("dst_open.txt", dst_open, fmt='%d');
+        opencell = ((grid <= thresh_high) & (grid >= thresh_low)) * 1.0  # threshold
+            
         # "1" in dst_open are the open cells
-
         # "0" in dst_open are the unvisited cells and occupied cells
-
-
 
         # detect contours
 
-        contours_open = measure.find_contours(dst, 0.5)
+        contours_open = measure.find_contours(opencell, 0.5)
 
         contours_open_cell = list()
 
@@ -334,17 +324,16 @@ class DemoResetter():
 
         thresh_high = -1
 
-        dst = ((grid <= thresh_high) & (grid >= thresh_low)) * 1.0  # threshold
+        unknown = ((grid <= thresh_high) & (grid >= thresh_low)) * 1.0  # threshold
 
-        # "1" in dst are the unvisited cells
+        # "1" in unknown are the unvisited cells
 
-        # "0" in dst are the open cells and occupied cells
+        # "0" in unknown are the open cells and occupied cells
 
 
+        # detect contours
 
-        # find contours
-
-        contours_unvisited = measure.find_contours(dst, 0.5)
+        contours_unvisited = measure.find_contours(unknown, 0.5)
 
         contours_unvisited_cell = list()
 
@@ -356,6 +345,11 @@ class DemoResetter():
 
         # print(contours_unvisited_cell)
 
+
+        # -----------------occupied cells---------------------
+        thresh_low = 90
+        thresh_high = 100
+        occup = ((grid <= thresh_high) & (grid >= thresh_low)) * 1.0
 
 
         # ----------------------------------------------------------------
@@ -413,7 +407,7 @@ class DemoResetter():
 
             # take regions with large enough areas
 
-            if region.area >= 20:  # do not consider small frontier groups
+            if region.area >= 100:  # do not consider small frontier groups
 
                 # print the centroid of each valid region
 
@@ -429,31 +423,23 @@ class DemoResetter():
 
                 manh_dist.append(manh)
 
-                # print(region.centroid)   # Centroid coordinate tuple (row, col)
-
-                # draw rectangle around segmented coins
-
-                # minr, minc, maxr, maxc = region.bbox
-
-                # rect = mpatches.Rectangle((minc, minr), maxc - minc, maxr - minr,
-
-                #                         fill=False, edgecolor='red', linewidth=1)
-
-                # ax.add_patch(rect)
-
-        # ax.set_axis_off()
-
-        # plt.tight_layout()
-
-        # plt.show()
-
-
         
         #next_goal = cents[manh_dist.index(min(manh_dist))]
       
 
       	# sort two list: centers of each frontiers according to the man_distance
-        cents_sorted = [x for _,x in sorted(zip(manh_dist, cents))]
+        cents_sorted = [x for _,x in sorted(zip(manh_dist, cents))]   # a sorted record of all the candidate goals (close-far)
+        
+
+        # calculate entropy of each candidates
+        entropy_shannon = list()  # corresponding Shannon's entropy of each candidate goals
+        for center in cents_sorted:         
+            entropy_shannon.append(ray_casting(size, unknown, occup, center, 100))    # laser range = 100
+        print 'Shannon Entropy = ',entropy_shannon
+        
+
+
+        # choose one goal from candidates
         if self.flag_stuck==0:
             next_goal_pixel = cents_sorted[0]
             print "try the closest goal!!"
@@ -473,14 +459,170 @@ class DemoResetter():
 
         next_goal_world[1] = next_goal_pixel[1] * resolution + origin_y
 
-
         #print 'next_goal: ', next_goal_world
-
-
 
         return next_goal_world
 
-		
+	
+def angle_between(p1, p2):  # calculation based on index
+    dif_y = -(p1[0] - p2[0])
+    dif_x = p1[1] - p2[1]
+    ang = np.arctan2(dif_y,dif_x)
+    return np.rad2deg(ang % (2 * np.pi))
+
+
+def ray_casting(size, unknown, occup, robot, laser_range):
+    #start = datetime.datetime.now()
+    # -----------------------------------------------------
+    # special situation: angle=0
+    exist_right_obstacle = list()  # initialize flag
+    robot = [int(i) for i in robot]
+    for col in range(robot[1]+1,size[1]):
+        if occup[robot[0],col]==1:
+            exist_right_obstacle.append(col)  # set the flag (there exist obstacle cell on the right of robot)
+
+    # the closest "right" obstacle is at (robot[0], exist_right_obstacle)
+    # if exist_right_obstacle = 0, then there is no such situation
+    #print(exist_right_obstacle)
+
+    occup[robot[0],robot[1]:] = 0  # clear all obstacles on the right
+
+    # -------------group the obstacles!------------------
+
+    conected_obstacle, label_num = measure.label(occup, return_num=True, connectivity=2)
+    #print("num of obstacles: %d" %(label_num))
+    #conected_obstacle = dip.float_to_im(conected_obstacle/label_num)
+    #dip.im_write(conected_frontier, "conected_frontier.tif")
+    #plt.imshow(conected_obstacle)
+    #plt.show()
+
+
+    # maybe detect contours here #
+    # but in occupancy grid, obstacle is like "contour"
+
+    # -------------coordinates of obstacles------------------
+    coords = list()
+    for region in regionprops(conected_obstacle):
+        coords.append(region.coords)  # a record of coordinates of all occupied cells that belong to the same obstacle
+    #coords[0] ... coords[label_num-1]
+
+    # -------------distances of obstacles------------------
+    dist = list()  # a record of distance of all occupied cells that belong to the same obstacle
+    # dist[0] ... dist[label_num-1]
+    dist_obst_i = list()
+    for i in range(label_num):  # for every obstacle
+        #print('Obstacle No.',i,':')
+        for coor in coords[i]:  # take out coordinate of each occupied cell that belongs to the same obstacle
+            #print('coordinate:',coor)
+            d = np.linalg.norm(coor - robot)
+            #print('distance between this cell to robot:',d)
+            dist_obst_i.append(d)
+        dist.append(dist_obst_i)
+        dist_obst_i = list()
+
+    #print(dist[0])
+    #print(dist[1])
+    #print('----')
+
+    # -------------angles of obstacles------------------
+    angle = list()  # a record of angle of all occupied cells that belong to the same obstacle
+    # angle[0] ... angle[label_num-1]
+    angle_obst_i = list()
+    for i in range(label_num):
+        #print('Obstacle No.', i, ':')
+        for coor in coords[i]:  # take out coordinate of each occupied cell that belongs to the same obstacle
+            #print('coordinate:', coor)
+            ang = angle_between(coor, robot)
+            #print('angle: ',ang)
+            angle_obst_i.append(ang)
+        angle.append(angle_obst_i)
+        angle_obst_i = list() #delete
+    #print('angles: ',angle)
+
+    # angle range of obstacle i:
+    angle_range = list()
+    for i in range(label_num):
+        #print('Obstacle No.', i, ':')
+        angle_min = min(angle[i])
+        angle_max = max(angle[i])
+        if exist_right_obstacle != list():  # if I have cleared some obstacles
+            if angle_min<=10:
+                angle_min = 0  # then I have to fill the blank
+            if angle_max>=360-10:
+                angle_max = 360  # fill the blank
+        #print('min angle:',angle_min)
+        #print('max angle:', angle_max)
+        #agr = [angle_min,angle_max]
+        angle_range.append([angle_min,angle_max])
+    #print('angle_range of obstacle i:',angle_range)
+
+
+    # -------------coordinates of unknown cells------------------
+    #unknown_coor = list()  # a record of coordinates of all unknown cells
+    unknown_index = list()  # a record of index of all unknown cells
+    unknown_coors = np.nonzero(unknown)
+    #unknown_coors_y = unknown_coors[0]  # change x/y
+    #unknown_coors_x = unknown_coors[1]  # change x/y
+    for i in range(unknown_coors[0].size):
+    #    unk = [unknown_coors_x[i],unknown_coors_y[i]]
+         unknown_index.append([unknown_coors[0][i],unknown_coors[1][i]])
+    #    unknown_coor.append(unk)
+    #print('coordinates of unknown cells:',unknown_coor)
+    #print('index of unknown cells:',unknown_index)
+
+    # -------------distances and angles of unknown cells------------------
+    unknown_dist = list()  # a record of distances of all unknown cells
+    unknown_angle = list()  # a record of angle of all unknown cells
+    unknown_index_inrange = list()  # a record of distances of unknown cells within laser range
+    for ele in unknown_index:
+        d = np.linalg.norm(np.array(ele) - robot)  # distance of unknown cell
+        if d <= laser_range:
+            unknown_dist.append(d)
+            unknown_index_inrange.append(ele)  # create new index list for cells within laser range
+            ang = angle_between(ele, robot)  # angle of unknown cell
+            unknown_angle.append(ang)
+    #print('distances of unknown cells to robot:',unknown_dist)
+    #print('angles of unknown cells:',unknown_angle)
+
+    # -------------cells that can be seen (faster algorithm)-------------
+    unknown_seen = np.zeros(size)
+    for ele in unknown_index_inrange:
+        unknown_seen[ele[0],ele[1]] = 1  # first only take out cells that within laser range
+
+    #unknown_seen_img = dip.float_to_im(unknown_seen)
+    #dip.imshow(unknown_seen_img)
+    #dip.show()
+
+    for i in range(label_num):
+        agr = angle_range[i]  # angle range of this obstacle
+        #print('obstacle i=', i)
+        #print('range=', agr)
+        count = 0
+        for ele in unknown_angle:
+            if agr[0] <= ele <= agr[1]:
+                # print('ele:', ele)
+                angle_closest_obs = min(angle[i], key=lambda x: abs(x - ele))
+                # print('nearest angle:', angle_closest_obs)
+                ind = angle[i].index(angle_closest_obs)
+                # print('index:', ind)
+                dist_closest_obs = dist[i][ind]
+                # print('distance of this angle:', dist_closest_obs)
+                # print('that is:',count, ele)
+                # print('index:',unknown_index[count])
+                ind = unknown_index_inrange[count]
+                if unknown_dist[count] > dist_closest_obs:
+                    unknown_seen[ind[0], ind[1]] = 0
+            count = count + 1
+    #unknown_seen_img = dip.float_to_im(unknown_seen)
+    #dip.imshow(unknown_seen_img)
+    #dip.show()
+
+    # entropy
+    entropy_Shannon = np.sum(unknown_seen == 1)  # assume p(unknown)=0.5
+    #print('Shannon entropy of map: ', entropy_Shannon,' bits')
+    return entropy_Shannon
+    #end = datetime.datetime.now()
+    #print(end-start)
 
 
 
