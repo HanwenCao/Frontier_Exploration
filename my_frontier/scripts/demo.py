@@ -29,14 +29,16 @@ import numpy as np
 #import dippykit as dip
 from skimage import measure
 from skimage.measure import label, regionprops
+import random
+
 
 class DemoResetter():
     def __init__(self):
         rospy.init_node('Prototype')
         # self.map_pub = rospy.Publisher("/map", OccupancyGrid, queue_size=1, latch=True)
-        #self.clear_costmap_srv = None
+        self.clear_costmap_srv = None
         # self.publishMap()
-        #self.pub = rospy.Publisher("/mobile_base/commands/reset_odometry", std_msgs.Empty, queue_size=1)
+        self.pub = rospy.Publisher("/mobile_base/commands/reset_odometry", std_msgs.Empty, queue_size=1)
         self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.callback_map)
         self.sub_odom = rospy.Subscriber('/odom', Odometry, self.callback_odom)
         self.client = actionlib.SimpleActionClient('move_base', move_base_msgs.MoveBaseAction)
@@ -55,14 +57,13 @@ class DemoResetter():
     def callback_map(self, OccupancyGrid):
         info = OccupancyGrid.info
         data = OccupancyGrid.data
-        rospy.loginfo(rospy.get_caller_id() + 'I heard the map')
+        #rospy.loginfo(rospy.get_caller_id() + 'I heard the map')
         rawmap = np.array(data)
         self.rawmap = rawmap.reshape(info.height, info.width)
         np.savetxt("rawmap.txt", self.rawmap, fmt='%d');
         self.p0 = np.array([info.origin.position.x, info.origin.position.y, info.origin.position.z, info.resolution])
         # p0 is the origin and resolution of the map
-        # p0 = p0.reshape([4,1])
-        np.savetxt("info.txt", self.p0, delimiter=' ')
+        #np.savetxt("info.txt", self.p0, delimiter=' ')
 
     def callback_odom(self, Odometry):
         position_x = Odometry.pose.pose.position.x
@@ -75,13 +76,13 @@ class DemoResetter():
         #print 'odom y: %s' % position_y
         #print 'odom orientation: %s' % orientation
         self.odom = np.array([position_x, position_y, orientation_z, orientation_w])
-        np.savetxt("odom.txt", self.odom, delimiter=' ')
+        #np.savetxt("odom.txt", self.odom, delimiter=' ')
 
     def initialGoals(self):	
         self.goals = []
         goalA = Pose()
-        goalA.position.x = 1000
-        goalA.position.y = 1000
+        goalA.position.x = 100
+        goalA.position.y = 100
         goalA.orientation.w = 1
         goalB = Pose()
         goalB.position.x = 0
@@ -92,70 +93,88 @@ class DemoResetter():
         print "initial goals!"
 
     def setupGoals(self, next_x, next_y):
-	if abs(self.goals[1].position.x - next_x)<0.1 and abs(self.goals[1].position.y - next_y)<0.1:
+	if abs(self.goals[1].position.x - next_x)<0.02 and abs(self.goals[1].position.y - next_y)<0.02:
 		print "Almost same to last goal, may get stuck"
                 self.flag_stuck = 1
         goalB = Pose()   # goalB is next frontier
         goalB.position.x = next_x
         goalB.position.y = next_y
-        goalB.orientation.w = 1
+        goalB.orientation.z = self.odom[2]
+        goalB.orientation.w = self.odom[3]
         self.goals[1] = goalB 
-        print "exploration goal is set!"
+        #print "exploration goal is set!"
+
+    def Rotate(self):	
+        #get orientation
+        print "rotate to get a whole view1"
+        #orientation_z = self.odom[2] #read current orientation
+        #orientation_w = self.odom[3]
+        #set a rotation goal
+        goal_rot = Pose()
+        goal_rot.position.x = self.odom[0]    #read current odom
+        goal_rot.position.y = self.odom[1]
+        goal_rot.orientation.z = 0#orientation_w
+        goal_rot.orientation.w = 1#1-orientation_w
+        self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
+
+        print "rotate to get a whole view2"
+        #get orientation
+        #orientation_z = self.odom[2] #read current orientation
+        #orientation_w = self.odom[3]
+        #set a rotation goal
+        goal_rot = Pose()
+        goal_rot.position.x = self.odom[0]  #read current odom
+        goal_rot.position.y = self.odom[1]
+        goal_rot.orientation.z = math.sin(math.pi/4)#orientation_w
+        goal_rot.orientation.w = math.cos(math.pi/4)#1-orientation_w
+        self.navigateToGoal(goal_pose=goal_rot)    # rotate 90'
+
+        print "rotate to get a whole view3"
+        #set a rotation goal
+        goal_rot = Pose()
+        goal_rot.position.x = self.odom[0]  #read current odom
+        goal_rot.position.y = self.odom[1]
+        goal_rot.orientation.z = 1
+        goal_rot.orientation.w = 0
+        self.navigateToGoal(goal_pose=goal_rot)    # rotate 90'
+
+        print "rotate to get a whole view4"
+        #set a rotation goal
+        goal_rot = Pose()
+        goal_rot.position.x = self.odom[0]  #read current odom
+        goal_rot.position.y = self.odom[1]
+        goal_rot.orientation.z = math.sin(math.pi/4)#orientation_w
+        goal_rot.orientation.w = -math.cos(math.pi/4)#1-orientation_w
+        self.navigateToGoal(goal_pose=goal_rot)    # rotate 180'
+        
+        print "rotate to get a whole view5"
+        #set a rotation goal
+        goal_rot = Pose()
+        goal_rot.position.x = self.odom[0]    #read current odom
+        goal_rot.position.y = self.odom[1]
+        goal_rot.orientation.z = 0#orientation_w
+        goal_rot.orientation.w = 1#1-orientation_w
+        self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
 
 
 
     def navigate(self):
 
-        #get orientation
-        print "rotate to get a whole view1"
-        orientation_z = self.odom[2] #read current orientation
-        orientation_w = self.odom[3]
-        #set a rotation goal
-        goal_rot = Pose()
-        goal_rot.position.x = self.odom[0]    #read current odom
-        goal_rot.position.y = self.odom[1]
-        goal_rot.orientation.z = orientation_w
-        goal_rot.orientation.w = 1-orientation_w
-        self.navigateToGoal(goal_pose=goal_rot)    # rotate 180'
-        print "rotate to get a whole view2"
-        #get orientation
-        orientation_z = self.odom[2] #read current orientation
-        orientation_w = self.odom[3]
-        #set a rotation goal
-        goal_rot = Pose()
-        goal_rot.position.x = self.odom[0]  #read current odom
-        goal_rot.position.y = self.odom[1]
-        goal_rot.orientation.z = orientation_w
-        goal_rot.orientation.w = 1-orientation_w
-        self.navigateToGoal(goal_pose=goal_rot)    # rotate 180'
-        
-
+        self.Rotate()
         while not rospy.is_shutdown():   
 
             if not self.stop:
 
                 try:
-                    print "rotate to get a whole view3"
-                    #get orientation
-                    orientation_z = self.odom[2] #read current orientation
-                    orientation_w = self.odom[3]
-                    #set a rotation goal
-                    goal_rot = Pose()
-                    goal_rot.position.x = self.odom[0]  #read current odom
-                    goal_rot.position.y = self.odom[1]
-                    goal_rot.orientation.z = orientation_w
-                    goal_rot.orientation.w = 1-orientation_w
-                    self.navigateToGoal(goal_pose=goal_rot)    # rotate 180'
-
-
+                    #self.Rotate()
                     next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])
                    
-
+                        
                     self.setupGoals(next_x=next_goal[0],next_y=next_goal[1])
-		    
+		    print "go to: ", self.goals[1]
                     self.navigateToGoal(goal_pose=self.goals[1])  # go to next frontier
-                    print "go to: ", self.goals[1]                    
-                    # self.resetCostmaps()
+                
+                    self.resetCostmaps()
 
 
 
@@ -172,7 +191,12 @@ class DemoResetter():
                 rospy.sleep(.2)
 
 
-
+    def resetCostmaps(self):
+        if self.clear_costmap_srv is None:
+            rospy.wait_for_service('/move_base/clear_costmaps')
+            self.clear_costmap_srv = rospy.ServiceProxy('/move_base/clear_costmaps', std_srvs.Empty)
+        self.clear_costmap_srv()
+        print "reset costmaps"
 
 
     def navigateToGoal(self, goal_pose):
@@ -187,7 +211,7 @@ class DemoResetter():
 
         goal.target_pose.header.stamp = rospy.Time.now()
 
-        goal.target_pose.header.frame_id = "odom"
+        goal.target_pose.header.frame_id = "odom"  #odom,  map
 
 
 
@@ -350,7 +374,8 @@ class DemoResetter():
 
         for ele in frontier_cells:
 
-            grid_frontier[math.floor(ele[0]), math.floor(ele[1])] = 1
+            #grid_frontier[math.floor(ele[0]), math.floor(ele[1])] = 1
+            grid_frontier[int(ele[0]), int(ele[1])] = 1
 
 
 
@@ -388,7 +413,7 @@ class DemoResetter():
 
             # take regions with large enough areas
 
-            if region.area >= 10:  # do not consider small frontier groups
+            if region.area >= 20:  # do not consider small frontier groups
 
                 # print the centroid of each valid region
 
@@ -431,8 +456,13 @@ class DemoResetter():
         cents_sorted = [x for _,x in sorted(zip(manh_dist, cents))]
         if self.flag_stuck==0:
             next_goal_pixel = cents_sorted[0]
+            print "try the closest goal!!"
         if self.flag_stuck==1:
-            next_goal_pixel = cents_sorted[1] # try a further frontier if get stuck into the closest one
+            #next_goal_pixel = cents_sorted[1] # try a further frontier if get stuck into the closest one
+            #cent_rand = sample(cents_sorted,  1)
+             # assume there are more than 4 frontiers
+            next_goal_pixel = cents_sorted[random.randint(1,3)] # try a random frontier if get stuck into the closest one
+            print "try another goal!!"
             self.flag_stuck=0
        
 		
@@ -443,14 +473,8 @@ class DemoResetter():
 
         next_goal_world[1] = next_goal_pixel[1] * resolution + origin_y
 
-	#while abs(self.goals[1].position.x - next_goal[0])<0.5 and abs(self.goals[1].position.y - next_goal[1])<0.5 :
-	#	cents.remove(manh_dist.index(max(manh_dist)))
-	#	manh_dist.remove(manh_dist.index(max(manh_dist)))
-	#	next_goal = cents[manh_dist.index(max(manh_dist))]
-	#	next_goal[0] = next_goal[0] * resolution + origin_x
-	#	next_goal[1] = next_goal[1] * resolution + origin_y
 
-        print 'next_goal: ', next_goal_world
+        #print 'next_goal: ', next_goal_world
 
 
 
