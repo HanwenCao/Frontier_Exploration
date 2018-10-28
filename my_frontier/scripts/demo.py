@@ -62,7 +62,7 @@ class DemoResetter():
         np.savetxt("rawmap.txt", self.rawmap, fmt='%d');
         self.p0 = np.array([info.origin.position.x, info.origin.position.y, info.origin.position.z, info.resolution])
         # p0 is the origin and resolution of the map
-        #np.savetxt("info.txt", self.p0, delimiter=' ')
+        np.savetxt("info.txt", self.p0, delimiter=' ')
 
     def callback_odom(self, Odometry):
         position_x = Odometry.pose.pose.position.x
@@ -75,7 +75,7 @@ class DemoResetter():
         #print 'odom y: %s' % position_y
         #print 'odom orientation: %s' % orientation
         self.odom = np.array([position_x, position_y, orientation_z, orientation_w])
-        #np.savetxt("odom.txt", self.odom, delimiter=' ')
+        np.savetxt("odom.txt", self.odom, delimiter=' ')
 
     def initialGoals(self):	
         self.goals = []
@@ -408,7 +408,7 @@ class DemoResetter():
 
             # take regions with large enough areas
 
-            if region.area >= 100:  # do not consider small frontier groups
+            if region.area >= 60:  # do not consider small frontier groups
 
                 # print the centroid of each valid region
 
@@ -416,7 +416,7 @@ class DemoResetter():
 
                 cen_x = region.centroid[1]  # Centroid coordinate tuple (row, col)
 
-                cents.append([cen_x, cen_y])
+                cents.append([cen_x, cen_y])  #cents[col,row]
 
                 manh = abs(cen_x - robot_pose_pixel[0]) + abs(
 
@@ -439,12 +439,12 @@ class DemoResetter():
             print 'Shannon Entropy = ', entropy_shannon
         
 
-
+        print "candidates(pixel col,row): ", cents_sorted
         # choose one goal from candidates
         for ele in cents_sorted:
             ele[0] = ele[0] * resolution + origin_x
             ele[1] = ele[1] * resolution + origin_y
-        print "candidates(pixel): ", cents_sorted
+        print "candidates(world xy): ", cents_sorted
         if self.flag_stuck==0:
             #next_goal_pixel = cents_sorted[0]
             #print "try the closest goal!!"
@@ -454,8 +454,8 @@ class DemoResetter():
             #next_goal_pixel = cents_sorted[1] # try a further frontier if get stuck into the closest one
             #cent_rand = sample(cents_sorted,  1)
              # assume there are more than 4 frontiers
-            next_goal_world = cents_sorted[random.randint(1,3)] # try a random frontier if get stuck into the closest one
             print "try another goal!!"
+            next_goal_world = cents_sorted[random.randint(1,3)] # try a random frontier if get stuck into the closest one
             self.flag_stuck=0
        
 		
@@ -485,10 +485,11 @@ def angle_points(p1, robot):  # calculation based on index
     return np.rad2deg(ang % (2 * np.pi))
 
 
-def ray_casting(size, unknown, occup, robot, laser_range):
+def ray_casting(size, unknown, occup, cent, laser_range):
     start = datetime.datetime.now()
-    robot[0] = int(robot[0])
-    robot[1] = int(robot[1])
+    robot = [0,0]
+    robot[0] = int(cent[1]) #robot[row,col]
+    robot[1] = int(cent[0])
     # -----------------------------------------------------
     # special situation: angle=0
     exist_right_obstacle = list()  # initialize flag
@@ -568,7 +569,7 @@ def ray_casting(size, unknown, occup, robot, laser_range):
         # print('max angle:', angle_max)
         # agr = [angle_min,angle_max]
         angle_range.append([angle_min, angle_max])
-    # print('angle_range of obstacle i:',angle_range)
+    #print 'angle_range of obstacle i:',angle_range
 
     # -------------coordinates of unknown cells------------------
     # unknown_coor = list()  # a record of coordinates of all unknown cells
