@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-
+import rospy
+from nav_msgs.srv import GetPlan
+from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Pose
+from nav_msgs.msg import Odometry
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData, Odometry
 from std_msgs.msg import String
@@ -25,10 +29,38 @@ from kobuki_msgs.msg import BumperEvent, WheelDropEvent
 import math
 import numpy as np
 #import dippykit as dip
-from skimage import measure
-from skimage.measure import label, regionprops
+#from skimage import measure
+#from skimage.measure import label, regionprops
 import random
 import datetime
+
+'''
+#Wait for the availability of this service
+rospy.wait_for_service('/move_base/make_plan')
+#Get a proxy to execute the service
+make_plan_srv = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
+
+# set start and goal
+start = PoseStamped()
+start.header.frame_id = "map"
+start.pose = Odometry.pose.pose  #msg.pose.pose
+goal = PoseStamped()
+goal.header.frame_id = "map"
+goal.pose = Odometry.pose.pose
+# set tolerance
+tolerance = 0.0
+
+try:
+    plan_response = make_plan(start=start, goal=goal, tolerance=tolerance)
+except rospy.ServiceException as exc:
+    print("Service did not process request: " + str(exc))
+
+
+
+#plan_response.plan
+#plan_response.plan.poses
+'''
+
 
 
 class DemoResetter():
@@ -156,22 +188,88 @@ class DemoResetter():
         self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
 
 
+	'''
+	#Wait for the availability of this service
+	rospy.wait_for_service('/move_base/make_plan')
+	#Get a proxy to execute the service
+	make_plan_srv = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
+
+	# set start and goal
+	start = PoseStamped()
+	start.header.frame_id = "map"
+	start.pose = Odometry.pose.pose  #msg.pose.pose
+	goal = PoseStamped()
+	goal.header.frame_id = "map"
+	goal.pose = Odometry.pose.pose
+	# set tolerance
+	tolerance = 0.0
+
+	try:
+	    plan_response = make_plan(start=start, goal=goal, tolerance=tolerance)
+	except rospy.ServiceException as exc:
+	    print("Service did not process request: " + str(exc))
+
+
+
+	#plan_response.plan
+	#plan_response.plan.poses
+	'''
 
     def navigate(self):
 
-        self.Rotate()
+        #self.Rotate()
+        #Wait for the availability of this service
+	rospy.wait_for_service('/move_base/make_plan')
+	#Get a proxy to execute the service
+	self.make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
+        # set start and goal
+	start = PoseStamped()
+	start.header.frame_id = "map"
+	#start.pose = Pose()  #msg.pose.pose
+        start.pose.position.x = self.odom[0]
+        start.pose.position.y = self.odom[1]
+        start.pose.orientation.w = 1
+
+        goal = PoseStamped()
+	goal.header.frame_id = "map"
+	#goal.pose = Pose()
+        goal.pose.position.x = self.odom[0]
+        goal.pose.position.y = self.odom[1]+0.2
+        goal.pose.orientation.w = 1
+
+	# set tolerance
+	tolerance = 0.0
+
+        try:
+
+	    plan_response = self.make_plan(start=start, goal=goal, tolerance=tolerance)
+
+	except rospy.ServiceException as exc:
+	    print("Service did not process request: " + str(exc))
+
+        print 'start:'
+        print start.pose
+        print 'plan:'
+        print plan_response.plan.poses
+        print 'goal:'
+        print goal.pose
+
+
+
+
+
         while not rospy.is_shutdown():   
 
             if not self.stop:
 
                 try:
                     #self.Rotate()
-                    next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])
+                    #next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])
                    
                         
-                    self.setupGoals(next_x=next_goal[0],next_y=next_goal[1])
-		    print "go to: ", self.goals[1]
-                    self.navigateToGoal(goal_pose=self.goals[1])  # go to next frontier
+                    #self.setupGoals(next_x=next_goal[0],next_y=next_goal[1])
+		    #print "go to: ", self.goals[1]
+                    #self.navigateToGoal(goal_pose=self.goals[1])  # go to next frontier
                 
                     self.resetCostmaps()
 
@@ -190,12 +288,13 @@ class DemoResetter():
                 rospy.sleep(.2)
 
 
+
     def resetCostmaps(self):
         if self.clear_costmap_srv is None:
             rospy.wait_for_service('/move_base/clear_costmaps')
             self.clear_costmap_srv = rospy.ServiceProxy('/move_base/clear_costmaps', std_srvs.Empty)
         self.clear_costmap_srv()
-        print "reset costmaps"
+        #print "reset costmaps"
 
 
     def navigateToGoal(self, goal_pose):
