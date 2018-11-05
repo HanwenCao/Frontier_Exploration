@@ -68,6 +68,7 @@ class DemoResetter():
         rospy.init_node('Prototype')
         # self.map_pub = rospy.Publisher("/map", OccupancyGrid, queue_size=1, latch=True)
         self.clear_costmap_srv = None
+        self.covariance_3d = np.zeros((3,3))
         # self.publishMap()
         self.pub = rospy.Publisher("/mobile_base/commands/reset_odometry", std_msgs.Empty, queue_size=1)
         self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.callback_map)
@@ -102,6 +103,18 @@ class DemoResetter():
         position_z = Odometry.pose.pose.position.z
         orientation_z = Odometry.pose.pose.orientation.z
         orientation_w = Odometry.pose.pose.orientation.w
+        covariance_6d = Odometry.pose.covariance
+        self.covariance_3d[0,0] = covariance_6d[0]
+        self.covariance_3d[0,1] = covariance_6d[1]
+        self.covariance_3d[0,2] = covariance_6d[5]
+        self.covariance_3d[1,0] = covariance_6d[6]
+        self.covariance_3d[1,1] = covariance_6d[7]
+        self.covariance_3d[1,2] = covariance_6d[11]
+        self.covariance_3d[2,0] = covariance_6d[30]
+        self.covariance_3d[2,1] = covariance_6d[31]
+        self.covariance_3d[2,2] = covariance_6d[35]
+        print covariance_6d
+        print self.covariance_3d
         #rospy.loginfo(rospy.get_caller_id() + 'I heard odom')
         #print 'odom x: %s' % position_x
         #print 'odom y: %s' % position_y
@@ -188,32 +201,26 @@ class DemoResetter():
         self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
 
 
-	'''
-	#Wait for the availability of this service
-	rospy.wait_for_service('/move_base/make_plan')
-	#Get a proxy to execute the service
-	make_plan_srv = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
 
-	# set start and goal
-	start = PoseStamped()
-	start.header.frame_id = "map"
-	start.pose = Odometry.pose.pose  #msg.pose.pose
-	goal = PoseStamped()
-	goal.header.frame_id = "map"
-	goal.pose = Odometry.pose.pose
-	# set tolerance
-	tolerance = 0.0
+    def covariance(self, P0, d_d, theta_k):
+    	#d_d : delta_d (odometry reading: translation)
+    	#theta_k : theta_k (current heading)
+        i=0
+        a = 1.5
+        V = a*np.array([[0.05**2, 0],[0, math.radians(0.5)**2]])  # odom noise variance, with standard deviation 5cm and 0.5 degree
+        
+        for dd in d_d:
+            theta = theta_k[i]
+            Fx = np.array([[1,0,-dd*math.sin(theta)],[0,1,dd*math.cos(theta)],[0,0,1]])  #jacobian matrix
+            Fv = np.array([[math.cos(theta), 0],[math.sin(theta), 0],[0,1]])
 
-	try:
-	    plan_response = make_plan(start=start, goal=goal, tolerance=tolerance)
-	except rospy.ServiceException as exc:
-	    print("Service did not process request: " + str(exc))
+            Pk = np.dot(np.dot(Fx, P0), np.transpose(Fx)) + np.dot(np.dot(Fv, V), np.transpose(Fv))
+            P0 = Pk
+            i=i+1
+
+        return Pk
 
 
-
-	#plan_response.plan
-	#plan_response.plan.poses
-	'''
 
     def navigate(self):
 
@@ -228,14 +235,16 @@ class DemoResetter():
 	#start.pose = Pose()  #msg.pose.pose
         start.pose.position.x = self.odom[0]
         start.pose.position.y = self.odom[1]
-        start.pose.orientation.w = 1
+        start.pose.orientation.z = self.odom[2]
+        start.pose.orientation.w = self.odom[3]
 
         goal = PoseStamped()
 	goal.header.frame_id = "map"
 	#goal.pose = Pose()
-        goal.pose.position.x = self.odom[0]
-        goal.pose.position.y = self.odom[1]+0.2
-        goal.pose.orientation.w = 1
+        goal.pose.position.x = 5.5
+        goal.pose.position.y = 1.63
+        goal.pose.orientation.z = self.odom[2]
+        goal.pose.orientation.w = self.odom[3]
 
 	# set tolerance
 	tolerance = 0.0
@@ -247,14 +256,56 @@ class DemoResetter():
 	except rospy.ServiceException as exc:
 	    print("Service did not process request: " + str(exc))
 
-        print 'start:'
-        print start.pose
-        print 'plan:'
-        print plan_response.plan.poses
-        print 'goal:'
-        print goal.pose
+        
+        plan_len = len(plan_response.plan.poses)
+        #print "plan size: %f" %(plan_len)
+        plan_x = np.empty((len(plan_response.plan.poses),1))
+        plan_y = np.empty((len(plan_response.plan.poses),1))
+        plan_w = np.empty((len(plan_response.plan.poses),1))
+        i = 0
+        for plan_pose in plan_response.plan.poses:
+            plan_x[i] = plan_pose.pose.position.x  #x
+            plan_y[i] = plan_pose.pose.position.y  #y
+            plan_w[i] = plan_pose.pose.orientation.w  #w
+            i = i+1
+        
+        
+        plan_x_next = np.zeros((plan_len,1))
+        plan_x_next[0:plan_len-1] = plan_x[1:plan_len]
+        plan_x_next[plan_len-1] = plan_x[plan_len-1]
+        plan_dx = plan_x_next - plan_x
+        
+        plan_y_next = np.zeros((plan_len,1))
+        plan_y_next[0:plan_len-1] = plan_y[1:plan_len]
+        plan_y_next[plan_len-1] = plan_y[plan_len-1]
+        plan_dy = plan_y_next - plan_y
 
+        plan_dd = np.sqrt(plan_dx**2 + plan_dy**2)  # displacement (delta_d)
+        #print plan_dd
 
+        plan_theta = np.angle(plan_dx + plan_dy*1j,deg=True)  # current heading (theta_k)
+        #print plan_theta
+
+        #plan_theta_next = np.zeros((plan_len,1))
+        #plan_theta_next[0:plan_len-1] = plan_theta[1:plan_len]
+        #plan_theta_next[plan_len-1] = plan_theta[plan_len-1]
+        #plan_dtheta = plan_theta_next - plan_theta  # delta_theta_k
+        #print plan_dtheta
+
+        P0 = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]])  # initial covariance
+        uncertainty = math.sqrt(np.linalg.det(P0))
+        #print 'initial ucertainty: ', uncertainty
+
+        # propogate
+        Pk = self.covariance( P0, plan_dd, plan_theta)
+        #predicted uncertainty
+        print(Pk)
+        uncertainty = math.sqrt(np.linalg.det(Pk))
+        #print 'final ucertainty: ', uncertainty
+
+        # make another plan
+        #goal.pose.position.x = 6
+        #plan_response = self.make_plan(start=start, goal=goal, tolerance=tolerance)
 
 
 
@@ -263,12 +314,13 @@ class DemoResetter():
             if not self.stop:
 
                 try:
+                    
                     #self.Rotate()
                     #next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])
                    
                         
                     #self.setupGoals(next_x=next_goal[0],next_y=next_goal[1])
-		    #print "go to: ", self.goals[1]
+                    #print "go to: ", self.goals[1]
                     #self.navigateToGoal(goal_pose=self.goals[1])  # go to next frontier
                 
                     self.resetCostmaps()
@@ -734,7 +786,9 @@ def ray_casting(size, unknown, occup, cent, laser_range):
     #dip.show()
 
     # entropy
-    entropy_Shannon = np.sum(unknown_seen == 1)  # assume p(unknown)=0.5
+    p_occpu = 0.1  # suppose 90% of cells are free
+    H_one = -((p_occpu*math.log(p_occpu,2)) + (1-p_occpu)*math.log((1-p_occpu),2))  # Shannon's entropy of one cell
+    entropy_Shannon = np.sum(unknown_seen == 1) * H_one 
     # print('Shannon entropy of map: ', entropy_Shannon,' bits')
 
     end = datetime.datetime.now()

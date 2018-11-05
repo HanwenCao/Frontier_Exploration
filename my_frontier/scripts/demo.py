@@ -5,6 +5,8 @@ from nav_msgs.msg import OccupancyGrid, MapMetaData, Odometry
 from std_msgs.msg import String
 import std_msgs.msg as std_msgs
 import std_srvs.srv as std_srvs
+from nav_msgs.srv import GetPlan
+from geometry_msgs.msg import PoseStamped
 import cv2
 import tf.transformations as transformations
 import math
@@ -36,6 +38,7 @@ class DemoResetter():
         rospy.init_node('Prototype')
         # self.map_pub = rospy.Publisher("/map", OccupancyGrid, queue_size=1, latch=True)
         self.clear_costmap_srv = None
+        self.p_occpu = 0.1  # the probability of occpancy foe each unknown cell
         # self.publishMap()
         self.pub = rospy.Publisher("/mobile_base/commands/reset_odometry", std_msgs.Empty, queue_size=1)
         self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.callback_map)
@@ -157,36 +160,47 @@ class DemoResetter():
 
 
 
+    def covariance(self, P0, d_d, theta_k):
+        #d_d : delta_d (odometry reading: translation)
+        #theta_k : theta_k (current heading)
+        i=0
+        a = 1.5
+        V = a*np.array([[0.05**2, 0],[0, math.radians(0.5)**2]])  # odom noise variance, with standard deviation 5cm and 0.5 degree
+        
+        for dd in d_d:
+            theta = theta_k[i]
+            Fx = np.array([[1,0,-dd*math.sin(theta)],[0,1,dd*math.cos(theta)],[0,0,1]])  #jacobian matrix
+            Fv = np.array([[math.cos(theta), 0],[math.sin(theta), 0],[0,1]])
+
+            Pk = np.dot(np.dot(Fx, P0), np.transpose(Fx)) + np.dot(np.dot(Fv, V), np.transpose(Fv))
+            P0 = Pk
+            i=i+1
+
+        return Pk
+
+
+
     def navigate(self):
 
         self.Rotate()
         while not rospy.is_shutdown():   
-
             if not self.stop:
+
 
                 try:
                     #self.Rotate()
-                    next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])
-                   
-                        
+                    next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])                  
                     self.setupGoals(next_x=next_goal[0],next_y=next_goal[1])
-		    print "go to: ", self.goals[1]
+                    print "go to: ", self.goals[1]
                     self.navigateToGoal(goal_pose=self.goals[1])  # go to next frontier
-                
                     self.resetCostmaps()
 
 
-
                 except Exception, e:
-
                     print e
-
                     pass
-
                     rospy.sleep(.1)
-
             else:
-
                 rospy.sleep(.2)
 
 
@@ -355,18 +369,12 @@ class DemoResetter():
 
         # ----------------------------------------------------------------
 
-        # frontier detection ! ! !
+        # frontier detection 
 
         frontier_cells = [x for x in contours_unvisited_cell if x in contours_open_cell]
 
-        # print('frontier: ')
-
-        # print(frontier_cells)  # to find the same elements in both lists
-
-
 
         grid_frontier = np.zeros(size)
-
         for ele in frontier_cells:
 
             #grid_frontier[math.floor(ele[0]), math.floor(ele[1])] = 1
@@ -375,76 +383,99 @@ class DemoResetter():
 
 
         # group them!
-
-        #grid_frontier_img = dip.float_to_im(grid_frontier)
-        #conected_frontier, label_num = measure.label(grid_frontier_img, return_num=True, connectivity=2)
-
-        #conected_frontier, label_num = measure.label(grid_frontier, return_num=True, connectivity=2)
         conected_frontier, label_num = measure.label(grid_frontier, return_num=True)
 
-        #print("num of frontiers: %d" % label_num)
-
-        #conected_frontier = dip.float_to_im(conected_frontier / label_num)
-        #conected_frontier = (conected_frontier / label_num) * 255
-
-
-        # delete small frontiers
-
-        # image_label_overlay = label2rgb(conected_frontier, image=grid_frontier_img)
-
-        # fig, ax = plt.subplots(figsize=(10, 6))
-
-        # ax.imshow(image_label_overlay)
-
-
-
+        
         manh_dist = []  # stores distances
-
         cents = []  # stores centers of frontiers
-
-
-
         for region in regionprops(conected_frontier):
 
             # take regions with large enough areas
 
             if region.area >= 60:  # do not consider small frontier groups
-
-                # print the centroid of each valid region
-
+                # the centroid of each valid region
                 cen_y = region.centroid[0]  # Centroid coordinate tuple (row, col)
-
                 cen_x = region.centroid[1]  # Centroid coordinate tuple (row, col)
-
                 cents.append([cen_x, cen_y])  #cents[col,row]
-
                 manh = abs(cen_x - robot_pose_pixel[0]) + abs(
-
                     cen_y - robot_pose_pixel[1])  # Manhattan Distance from robot to each frontier center
-
                 manh_dist.append(manh)
-
-        
-        #next_goal = cents[manh_dist.index(min(manh_dist))]
       
 
       	# sort two list: centers of each frontiers according to the man_distance
         cents_sorted = [x for _,x in sorted(zip(manh_dist, cents))]   # a sorted record of all the candidate goals (close-far)
         
 
+
+
         # calculate entropy of each candidates
         entropy_shannon = list()  # corresponding Shannon's entropy of each candidate goals
-        for center in cents_sorted:         
-            entropy_shannon.append(ray_casting(size, unknown, occup, center, 150))    # laser range = 7.5m
+        for center in cents_sorted:  
+            num_unknown = ray_casting(size, unknown, occup, center, 80)   
+
+
+            #Shannon's entropy
+            entropy_shannon_i = self.cal_entropy_shannon(num_unknown)  # shannon's entropy at this location
+    
+            entropy_shannon.append(entropy_shannon_i)    # laser range = 4m
             print 'Shannon Entropy = ', entropy_shannon
-        
+ 
+
+
 
         print "candidates(pixel col,row): ", cents_sorted
-        # choose one goal from candidates
+        # pixel to world
         for ele in cents_sorted:
             ele[0] = ele[0] * resolution + origin_x
             ele[1] = ele[1] * resolution + origin_y
         print "candidates(world xy): ", cents_sorted
+
+
+
+
+
+        # generate trajectory to each frontier
+        # Wait for the availability of this service
+        rospy.wait_for_service('/move_base/make_plan')
+
+        # Get a proxy to execute the service
+        self.make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
+
+        for center in cents_sorted:
+
+            plan_start, plan_goal, plan_tolerance = self.set_plan_goal(center)  #set up a planning goal 
+            plan_response = self.make_plan(start=plan_start, goal=plan_goal, tolerance=plan_tolerance) # plan
+
+            plan_len = len(plan_response.plan.poses)  # length of trajectory
+            print "plan size: %f" %(plan_len)
+            if plan_len == 0:  # fail to make a plan
+                print 'cannot generate trajectory'
+                continue
+
+            plan_dd, plan_theta = self.get_plan_trajectory(plan_response, plan_len)  # get delta_d and theta_k for uncertainty propogation
+
+
+            # covariance
+            P0 = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]])  # initial covariance
+            uncertainty = math.sqrt(np.linalg.det(P0))
+            #print 'initial ucertainty: ', uncertainty
+
+            # propogate
+            Pk = self.covariance( P0, plan_dd, plan_theta)
+            #predicted uncertainty
+            print(Pk)
+            uncertainty = math.sqrt(np.linalg.det(Pk))
+            print 'final ucertainty: ', uncertainty
+
+            # Renyi's entropy
+            alpha = 1 + 1/uncertainty
+            H_renyi_one = (1/(1-alpha)) * math.log((self.p_occpu**alpha + (1-self.p_occpu)**alpha), 2)
+
+        
+
+
+
+
         if self.flag_stuck==0:
             #next_goal_pixel = cents_sorted[0]
             #print "try the closest goal!!"
@@ -469,6 +500,66 @@ class DemoResetter():
         #print 'next_goal: ', next_goal_world
 
         return next_goal_world
+
+
+
+    def cal_entropy_shannon(self, num_unknown):
+            # Shannon's entropy of one cell
+            H_shannon_one = - ( self.p_occpu*math.log(self.p_occpu,2) + (1-self.p_occpu)*math.log((1-self.p_occpu),2) ) 
+            # total Shannon's entrooy
+            entropy_shannon = num_unknown * H_shannon_one 
+            return entropy_shannon  
+
+
+    def set_plan_goal(self, center):
+        # make a plan and generate a trajectory to the "center" without real action
+        
+        # set start and goal
+        start = PoseStamped()
+        start.header.frame_id = "map"
+        start.pose.position.x = self.odom[0]
+        start.pose.position.y = self.odom[1]
+        start.pose.orientation.z = self.odom[2]
+        start.pose.orientation.w = self.odom[3]
+
+        goal = PoseStamped()
+        goal.header.frame_id = "map"
+        goal.pose.position.x = center[0]
+        goal.pose.position.y = center[1]
+        goal.pose.orientation.z = self.odom[2]
+        goal.pose.orientation.w = self.odom[3]
+
+        # set tolerance
+        tolerance = 0.1
+        return start, goal, tolerance
+
+
+    def get_plan_trajectory(self, plan_response, plan_len):
+        plan_x = np.empty((len(plan_response.plan.poses),1))
+        plan_y = np.empty((len(plan_response.plan.poses),1))
+        plan_w = np.empty((len(plan_response.plan.poses),1))
+        i = 0
+        for plan_pose in plan_response.plan.poses:
+            plan_x[i] = plan_pose.pose.position.x  #x
+            plan_y[i] = plan_pose.pose.position.y  #y
+            plan_w[i] = plan_pose.pose.orientation.w  #w
+            i = i+1
+        plan_x_next = np.zeros((plan_len,1))
+        plan_x_next[0:plan_len-1] = plan_x[1:plan_len]
+        plan_x_next[plan_len-1] = plan_x[plan_len-1]
+        plan_dx = plan_x_next - plan_x
+    
+        plan_y_next = np.zeros((plan_len,1))
+        plan_y_next[0:plan_len-1] = plan_y[1:plan_len]
+        plan_y_next[plan_len-1] = plan_y[plan_len-1]
+        plan_dy = plan_y_next - plan_y
+
+        plan_dd = np.sqrt(plan_dx**2 + plan_dy**2)  # displacement (delta_d)
+        #print plan_dd
+
+        plan_theta = np.angle(plan_dx + plan_dy*1j,deg=True)  # current heading (theta_k)
+        return plan_dd, plan_theta 
+
 
 
 def angle_point(p1, p2):  # calculation based on index
@@ -628,19 +719,11 @@ def ray_casting(size, unknown, occup, cent, laser_range):
         for ele in unknown_behind:
             unknown_seen[ele[0], ele[1]] = 0
 
+    return np.sum(unknown_seen == 1)
 
 
-    #unknown_seen_img = dip.float_to_im(unknown_seen)
-    #dip.imshow(unknown_seen_img)
-    #dip.show()
 
-    # entropy
-    entropy_Shannon = np.sum(unknown_seen == 1)  # assume p(unknown)=0.5
-    # print('Shannon entropy of map: ', entropy_Shannon,' bits')
 
-    end = datetime.datetime.now()
-    print 'time = ', end - start
-    return entropy_Shannon
 
 
 
