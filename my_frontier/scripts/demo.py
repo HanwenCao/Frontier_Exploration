@@ -2,7 +2,7 @@
 
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData, Odometry
-from std_msgs.msg import String
+from std_msgs.msg import String, Float64
 import std_msgs.msg as std_msgs
 import std_srvs.srv as std_srvs
 from nav_msgs.srv import GetPlan
@@ -39,10 +39,12 @@ class DemoResetter():
         # self.map_pub = rospy.Publisher("/map", OccupancyGrid, queue_size=1, latch=True)
         self.clear_costmap_srv = None
         self.p_occpu = 0.1  # the probability of occpancy foe each unknown cell
+        self.pose_entropy_gmapping = 4.377   # an initial value of ~entropy published by gmapping
         # self.publishMap()
         self.pub = rospy.Publisher("/mobile_base/commands/reset_odometry", std_msgs.Empty, queue_size=1)
         self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.callback_map)
         self.sub_odom = rospy.Subscriber('/odom', Odometry, self.callback_odom)
+        self.sub_entropy_gmapping = rospy.Subscriber('slam_gmapping/entropy', Float64, self.callback_entropy_gmapping)
         self.client = actionlib.SimpleActionClient('move_base', move_base_msgs.MoveBaseAction)
         print "waiting for server"
         self.client.wait_for_server()
@@ -79,6 +81,13 @@ class DemoResetter():
         #print 'odom orientation: %s' % orientation
         self.odom = np.array([position_x, position_y, orientation_z, orientation_w])
         np.savetxt("odom.txt", self.odom, delimiter=' ')
+
+
+    def callback_entropy_gmapping(self, data):
+        print 'pose entropy estimated by gmapping: ', data.data
+        self.pose_entropy_gmapping = data.data
+
+
 
     def initialGoals(self):	
         self.goals = []
