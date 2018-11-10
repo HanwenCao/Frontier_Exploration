@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import rospy
+
 from nav_msgs.msg import OccupancyGrid, MapMetaData, Odometry
 from std_msgs.msg import String, Float64
 import std_msgs.msg as std_msgs
@@ -44,6 +45,7 @@ class DemoResetter():
         self.pub = rospy.Publisher("/mobile_base/commands/reset_odometry", std_msgs.Empty, queue_size=1)
         self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.callback_map)
         self.sub_odom = rospy.Subscriber('/odom', Odometry, self.callback_odom)
+        self.tflistener = tf.TransformListener()
         self.sub_entropy_gmapping = rospy.Subscriber('slam_gmapping/entropy', Float64, self.callback_entropy_gmapping)
         self.client = actionlib.SimpleActionClient('move_base', move_base_msgs.MoveBaseAction)
         print "waiting for server"
@@ -188,6 +190,18 @@ class DemoResetter():
         return Pk
 
 
+    def getcurrentpose(self):
+        # get pose in map frame
+        tf_trans, tf_rot = self.tflistener.lookupTransform('/map', '/odom', rospy.Time(0))
+        theta_tf = math.acos(tf_rot[3])  
+        x_tf = tf_trans[0]
+        y_tf = tf_trans[1]
+        T_tf = np.array([[math.cos(theta_tf), -math.sin(theta_tf), x_tf],[math.sin(theta_tf), math.cos(theta_tf), y_tf],[0,0,1]])
+        pose_odom = np.array([self.odom[0], self.odom[1], 1])
+        self.pose_map = T_tf.dot(pose_odom)
+        
+
+
 
     def navigate(self):
 
@@ -198,7 +212,9 @@ class DemoResetter():
 
                 try:
                     #self.Rotate()
-                    next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.odom[0:2])                  
+                    
+                    self.getcurrentpose()
+                    next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.pose_map)  # in map frame                  
                     self.setupGoals(next_x=next_goal[0],next_y=next_goal[1])
                     print "go to: ", self.goals[1]
                     self.navigateToGoal(goal_pose=self.goals[1])  # go to next frontier
