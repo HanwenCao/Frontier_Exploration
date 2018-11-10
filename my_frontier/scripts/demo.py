@@ -41,6 +41,8 @@ class DemoResetter():
         self.clear_costmap_srv = None
         self.p_occpu = 0.1  # the probability of occpancy foe each unknown cell
         self.pose_entropy_gmapping = 4.377   # an initial value of ~entropy published by gmapping
+        self.counter_odom = 0  
+        self.poses_hist = np.array([[-99.0,-99.0,0]])
         # self.publishMap()
         self.pub = rospy.Publisher("/mobile_base/commands/reset_odometry", std_msgs.Empty, queue_size=1)
         self.sub_map = rospy.Subscriber('/map', OccupancyGrid, self.callback_map)
@@ -72,17 +74,24 @@ class DemoResetter():
         np.savetxt("info.txt", self.p0, delimiter=' ')
 
     def callback_odom(self, Odometry):
+        self.counter_odom = self.counter_odom + 1;
         position_x = Odometry.pose.pose.position.x
         position_y = Odometry.pose.pose.position.y
         position_z = Odometry.pose.pose.position.z
         orientation_z = Odometry.pose.pose.orientation.z
         orientation_w = Odometry.pose.pose.orientation.w
-        #rospy.loginfo(rospy.get_caller_id() + 'I heard odom')
+        #heading = math.atan2(2*orientation_w*orientation_z,1-2*orientation_z**2)      
         #print 'odom x: %s' % position_x
         #print 'odom y: %s' % position_y
-        #print 'odom orientation: %s' % orientation
         self.odom = np.array([position_x, position_y, orientation_z, orientation_w])
         np.savetxt("odom.txt", self.odom, delimiter=' ')
+        if(self.counter_odom > 500):
+            #record current pose in map frame
+            self.counter_odom = 0
+            self.getcurrentpose()
+            self.poses_hist = np.append(self.poses_hist, self.pose_map[np.newaxis], axis=0)  # a record of history position
+            #print self.poses_hist
+            
 
 
     def callback_entropy_gmapping(self, data):
@@ -193,13 +202,20 @@ class DemoResetter():
     def getcurrentpose(self):
         # get pose in map frame
         tf_trans, tf_rot = self.tflistener.lookupTransform('/map', '/odom', rospy.Time(0))
-        theta_tf = math.acos(tf_rot[3])  
+        #theta_tf1 = math.acos(tf_rot[3]) 
+        #print '1: ', theta_tf1
+        theta_tf = math.atan2(2*tf_rot[3]*tf_rot[2],1-2*tf_rot[2]**2)
+        #print '2: ', theta_tf
+        theta_odom = math.atan2(2*self.odom[3]*self.odom[2],1-2*self.odom[2]**2) #rad
         x_tf = tf_trans[0]
         y_tf = tf_trans[1]
         T_tf = np.array([[math.cos(theta_tf), -math.sin(theta_tf), x_tf],[math.sin(theta_tf), math.cos(theta_tf), y_tf],[0,0,1]])
         pose_odom = np.array([self.odom[0], self.odom[1], 1])
-        self.pose_map = T_tf.dot(pose_odom)
-        
+        positioninmap = T_tf.dot(pose_odom)  
+        self.pose_map = positioninmap
+        self.pose_map[2] = theta_odom + theta_tf  #nparray[x,y,theta(rad)]
+        self.pose_map[2] = self.pose_map[2]*180/math.pi  #nparray[x,y,theta(degree)]
+        #print self.pose_map
 
 
 
@@ -212,7 +228,7 @@ class DemoResetter():
 
                 try:
                     #self.Rotate()
-                    
+                    aa=0
                     self.getcurrentpose()
                     next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.pose_map)  # in map frame                  
                     self.setupGoals(next_x=next_goal[0],next_y=next_goal[1])
@@ -540,10 +556,11 @@ class DemoResetter():
         # make a plan and generate a trajectory to the "center" without real action
         
         # set start and goal
+        self.getcurrentpose()
         start = PoseStamped()
         start.header.frame_id = "map"
-        start.pose.position.x = self.odom[0]
-        start.pose.position.y = self.odom[1]
+        start.pose.position.x = self.pose_map[0]
+        start.pose.position.y = self.pose_map[1]
         start.pose.orientation.z = self.odom[2]
         start.pose.orientation.w = self.odom[3]
 
