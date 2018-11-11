@@ -451,7 +451,8 @@ class DemoResetter():
 
         # calculate entropy of each candidates
         entropy_shannon = list()  # corresponding Shannon's entropy of each candidate goals
-        for center in cents_sorted:  
+
+        for center in cents_sorted:  # in image frame
             num_unknown = ray_casting(size, unknown, occup, center, 80)   
 
 
@@ -482,7 +483,9 @@ class DemoResetter():
         # Get a proxy to execute the service
         self.make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
 
-        for center in cents_sorted:
+        closure_count_list = []
+
+        for center in cents_sorted:  # in map frame
 
             plan_start, plan_goal, plan_tolerance = self.set_plan_goal(center)  #set up a planning goal 
             plan_response = self.make_plan(start=plan_start, goal=plan_goal, tolerance=plan_tolerance) # plan
@@ -492,8 +495,37 @@ class DemoResetter():
             if plan_len == 0:  # fail to make a plan
                 print 'cannot generate trajectory'
                 continue
+            if plan_len > 2000:  # tune here------------------
+                print 'too long'
+                #continue
 
-            plan_dd, plan_theta = self.get_plan_trajectory(plan_response, plan_len)  # get delta_d and theta_k for uncertainty propogation
+            plan_dd, plan_theta, plan_x, plan_y = self.get_plan_trajectory(plan_response, plan_len)  # get delta_d and theta_k for uncertainty propogation
+            plan_pose = np.zeros((len(plan_x), 3))
+            plan_pose[:,0] = plan_x.reshape((1,len(plan_x)))
+            plan_pose[:,1] = plan_y.reshape((1,len(plan_y)))
+            plan_pose[:,2] = plan_theta.reshape((1,len(plan_theta)))
+            plan_pose = plan_pose[::10,:]  # downsample
+            #print plan_pose
+
+            closure_count = 0 # number of familiar poses in a plan
+
+            for pose in plan_pose:  #for every pose in a plan
+                hist = self.poses_hist
+                diff_pose = hist - pose
+                #diff_pose[:,2] = diff_pose[:,2] / 9.0   #normalize heading angle
+                diff_pose[:,2] = 0  # mute angle
+                norm = np.linalg.norm(diff_pose, axis=1)
+                hist_close_to_plan = hist[norm<0.2,:]   # in history poses, which poses are close to current pose in current plan
+                #print 'in histroy poses, the close poses are ',hist_close_to_plan
+                if len(hist_close_to_plan)>1:  #if this plan pose is familiar
+                    closure_count = closure_count + 1
+
+            print 'for this candidate traj, the number of familiar pose is ', closure_count
+            closure_count_list.append(closure_count)  # for different candidates, larger values means more familiar poses
+
+            print "num of familiar pose for every candidate:\n", closure_count_list
+
+
 
 
             # covariance
@@ -504,23 +536,23 @@ class DemoResetter():
             # propogate
             Pk = self.covariance( P0, plan_dd, plan_theta)
             #predicted uncertainty
-            print(Pk)
+            #print(Pk)
             uncertainty = math.sqrt(np.linalg.det(Pk))
             print 'final ucertainty: ', uncertainty
 
             # Renyi's entropy
             alpha = 1 + 1/uncertainty
             H_renyi_one = (1/(1-alpha)) * math.log((self.p_occpu**alpha + (1-self.p_occpu)**alpha), 2)
+            #entropy_renyi = H_renyi_one * 
 
         
-
-
 
 
         if self.flag_stuck==0:
             #next_goal_pixel = cents_sorted[0]
             #print "try the closest goal!!"
-            next_goal_world = cents_sorted[ entropy_shannon.index(max(entropy_shannon)) ]
+            next_goal_world = cents_sorted[ entropy_shannon.index(max(entropy_shannon)) ] # max info-gain frontier
+            next_goal_world = cents_sorted[ closure_count_list.index(max(closure_count_list)) ] # zigzag frontier
             print "try the max-info-gain goal!!"
         if self.flag_stuck==1:
             #next_goal_pixel = cents_sorted[1] # try a further frontier if get stuck into the closest one
@@ -600,7 +632,7 @@ class DemoResetter():
         #print plan_dd
 
         plan_theta = np.angle(plan_dx + plan_dy*1j,deg=True)  # current heading (theta_k)
-        return plan_dd, plan_theta 
+        return plan_dd, plan_theta, plan_x, plan_y
 
 
 

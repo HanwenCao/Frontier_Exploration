@@ -113,8 +113,8 @@ class DemoResetter():
         self.covariance_3d[2,0] = covariance_6d[30]
         self.covariance_3d[2,1] = covariance_6d[31]
         self.covariance_3d[2,2] = covariance_6d[35]
-        print covariance_6d
-        print self.covariance_3d
+        #print covariance_6d
+        #print self.covariance_3d
         #rospy.loginfo(rospy.get_caller_id() + 'I heard odom')
         #print 'odom x: %s' % position_x
         #print 'odom y: %s' % position_y
@@ -241,13 +241,13 @@ class DemoResetter():
         goal = PoseStamped()
 	goal.header.frame_id = "map"
 	#goal.pose = Pose()
-        goal.pose.position.x = 5.5
-        goal.pose.position.y = 1.63
+        goal.pose.position.x = -3
+        goal.pose.position.y = 9.9
         goal.pose.orientation.z = self.odom[2]
         goal.pose.orientation.w = self.odom[3]
 
 	# set tolerance
-	tolerance = 0.0
+	tolerance = 0.1
 
         try:
 
@@ -285,6 +285,7 @@ class DemoResetter():
 
         plan_theta = np.angle(plan_dx + plan_dy*1j,deg=True)  # current heading (theta_k)
         #print plan_theta
+        
 
         #plan_theta_next = np.zeros((plan_len,1))
         #plan_theta_next[0:plan_len-1] = plan_theta[1:plan_len]
@@ -299,7 +300,7 @@ class DemoResetter():
         # propogate
         Pk = self.covariance( P0, plan_dd, plan_theta)
         #predicted uncertainty
-        print(Pk)
+        #print(Pk)
         uncertainty = math.sqrt(np.linalg.det(Pk))
         #print 'final ucertainty: ', uncertainty
 
