@@ -202,7 +202,7 @@ class DemoResetter():
 
 
 
-    def covariance(self, P0, d_d, theta_k):
+    def covariance(self, P0, Pk, d_d, theta_k):
     	#d_d : delta_d (odometry reading: translation)
     	#theta_k : theta_k (current heading)
         i=0
@@ -249,7 +249,7 @@ class DemoResetter():
 	# set tolerance
 	tolerance = 0.1
 
-        try:
+    try:
 
 	    plan_response = self.make_plan(start=start, goal=goal, tolerance=tolerance)
 
@@ -298,7 +298,7 @@ class DemoResetter():
         #print 'initial ucertainty: ', uncertainty
 
         # propogate
-        Pk = self.covariance( P0, plan_dd, plan_theta)
+        Pk = self.covariance( P0, Pk, plan_dd, plan_theta)
         #predicted uncertainty
         #print(Pk)
         uncertainty = math.sqrt(np.linalg.det(Pk))

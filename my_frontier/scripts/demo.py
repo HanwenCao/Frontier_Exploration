@@ -180,7 +180,7 @@ class DemoResetter():
 
 
 
-    def covariance(self, P0, d_d, theta_k):
+    def covariance(self, P0, Pk, d_d, theta_k):
         #d_d : delta_d (odometry reading: translation)
         #theta_k : theta_k (current heading)
         i=0
@@ -451,15 +451,17 @@ class DemoResetter():
 
         # calculate entropy of each candidates
         entropy_shannon = list()  # corresponding Shannon's entropy of each candidate goals
+        raycast_num = list()
 
         for center in cents_sorted:  # in image frame
-            num_unknown = ray_casting(size, unknown, occup, center, 80)   
-
+            num_unknown = ray_casting(size, unknown, occup, center, 80)  
+            raycast_num.append(num_unknown) 
 
             #Shannon's entropy
             entropy_shannon_i = self.cal_entropy_shannon(num_unknown)  # shannon's entropy at this location
     
             entropy_shannon.append(entropy_shannon_i)    # laser range = 4m
+
             print 'Shannon Entropy = ', entropy_shannon
  
 
@@ -484,8 +486,10 @@ class DemoResetter():
         self.make_plan = rospy.ServiceProxy('/move_base/make_plan', GetPlan)
 
         closure_count_list = []
+        candidate_num = 0
+        entropy_renyi = []
 
-        for center in cents_sorted:  # in map frame
+        for center in cents_sorted:  # in map frame, for each candidate
 
             plan_start, plan_goal, plan_tolerance = self.set_plan_goal(center)  #set up a planning goal 
             plan_response = self.make_plan(start=plan_start, goal=plan_goal, tolerance=plan_tolerance) # plan
@@ -499,51 +503,48 @@ class DemoResetter():
                 print 'too long'
                 #continue
 
-            plan_dd, plan_theta, plan_x, plan_y = self.get_plan_trajectory(plan_response, plan_len)  # get delta_d and theta_k for uncertainty propogation
+            plan_dd, plan_theta, plan_x, plan_y = self.get_plan_trajectory(plan_response)  # get delta_d and theta_k for uncertainty propogation
+            #print '\nplan length:',len(plan_dd), len(plan_theta), len(plan_x), len(plan_y)
             plan_pose = np.zeros((len(plan_x), 3))
-            plan_pose[:,0] = plan_x.reshape((1,len(plan_x)))
-            plan_pose[:,1] = plan_y.reshape((1,len(plan_y)))
-            plan_pose[:,2] = plan_theta.reshape((1,len(plan_theta)))
-            plan_pose = plan_pose[::10,:]  # downsample
+            plan_pose[:,0] = plan_x.reshape((1,len(plan_x)))  #x
+            plan_pose[:,1] = plan_y.reshape((1,len(plan_y)))  #y
+            plan_pose[:,2] = plan_theta.reshape((1,len(plan_theta)))  #theta(degree)
             #print plan_pose
 
-            closure_count = 0 # number of familiar poses in a plan
+            # loop closure detection
+            plan_dd_trunc, plan_theta_trunc, closure_count = self.LoopClosure(plan_pose, plan_dd, plan_theta)
 
-            for pose in plan_pose:  #for every pose in a plan
-                hist = self.poses_hist
-                diff_pose = hist - pose
-                #diff_pose[:,2] = diff_pose[:,2] / 9.0   #normalize heading angle
-                diff_pose[:,2] = 0  # mute angle
-                norm = np.linalg.norm(diff_pose, axis=1)
-                hist_close_to_plan = hist[norm<0.2,:]   # in history poses, which poses are close to current pose in current plan
-                #print 'in histroy poses, the close poses are ',hist_close_to_plan
-                if len(hist_close_to_plan)>1:  #if this plan pose is familiar
-                    closure_count = closure_count + 1
-
-            print 'for this candidate traj, the number of familiar pose is ', closure_count
-            closure_count_list.append(closure_count)  # for different candidates, larger values means more familiar poses
-
+            #print 'for this candidate traj, the number of familiar pose is ', closure_count
+            closure_count_list.append(closure_count)  # for different candidates, larger values means more familiar poses            
             print "num of familiar pose for every candidate:\n", closure_count_list
-
-
-
 
             # covariance
             P0 = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]])  # initial covariance
+            Pk = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]]) 
             uncertainty = math.sqrt(np.linalg.det(P0))
             #print 'initial ucertainty: ', uncertainty
 
             # propogate
-            Pk = self.covariance( P0, plan_dd, plan_theta)
+            Pk = self.covariance( P0, Pk, plan_dd_trunc, plan_theta_trunc)
             #predicted uncertainty
             #print(Pk)
             uncertainty = math.sqrt(np.linalg.det(Pk))
             print 'final ucertainty: ', uncertainty
 
+            num_cell_seen = raycast_num[candidate_num]
+
             # Renyi's entropy
-            alpha = 1 + 1/uncertainty
-            H_renyi_one = (1/(1-alpha)) * math.log((self.p_occpu**alpha + (1-self.p_occpu)**alpha), 2)
-            #entropy_renyi = H_renyi_one * 
+            entropy_renyi_i = self.RenyiEntropy(uncertainty, num_cell_seen) 
+            
+            entropy_renyi.append(entropy_renyi_i)
+
+            print 'Renyi Entropy: ', entropy_renyi
+            candidate_num = candidate_num + 1
+
+        utility = np.asarray(entropy_shannon) - np.asarray(entropy_renyi)
+        print "Utility of each candidate: ", utility
+        print 'max index:',np.argmax(utility)
+
 
         
 
@@ -553,6 +554,7 @@ class DemoResetter():
             #print "try the closest goal!!"
             next_goal_world = cents_sorted[ entropy_shannon.index(max(entropy_shannon)) ] # max info-gain frontier
             next_goal_world = cents_sorted[ closure_count_list.index(max(closure_count_list)) ] # zigzag frontier
+            next_goal_world = cents_sorted[ np.argmax(utility) ] # max utility
             print "try the max-info-gain goal!!"
         if self.flag_stuck==1:
             #next_goal_pixel = cents_sorted[1] # try a further frontier if get stuck into the closest one
@@ -574,14 +576,54 @@ class DemoResetter():
 
         return next_goal_world
 
+    def RenyiEntropy(self, uncertainty, num_cell_seen): 
+        # Renyi's entropy
+        alpha = 1 + 1/uncertainty
+        H_renyi_one = (1/(1-alpha)) * math.log((self.p_occpu**alpha + (1-self.p_occpu)**alpha), 2)
+        entropy_renyi_i = H_renyi_one * num_cell_seen
+        return entropy_renyi_i
+        
+
+
+    def LoopClosure(self, plan_pose, plan_dd, plan_theta):
+     
+        closure_count = 0 # number of familiar poses in a plan
+        loop_closure_index = 0
+        i = 0
+        loop_closure_pose = plan_pose[0,:] # set initial value to the first pose in a plan traj
+        for pose in plan_pose:  #for every pose in a plan
+            i = i + 1
+            hist = self.poses_hist
+            diff_pose = hist - pose
+            diff_angle = np.absolute(diff_pose[:,2])
+            diff_pose[:,2] = 0  # mute angle
+            norm = np.linalg.norm(diff_pose, axis=1)
+            hist_close_to_plan = hist[(norm<0.2)*((diff_angle<30)+(diff_angle>330)),:]   # in history poses, which poses are close to current pose in current plan
+            #print 'in histroy poses, the close poses are ',hist_close_to_plan
+            if len(hist_close_to_plan)>1:  #if this plan pose is familiar
+                closure_count = closure_count + 1
+                loop_closure_index = i
+                # start pose for uncertainty propogatation should be updated
+                loop_closure_pose = pose  # the last closure pose
+                  
+            #print "in the plan :", plan_pose
+            #print "find this:",loop_closure_pose
+            #print "the index is",loop_closure_index
+            #print 'before:',plan_dd
+            plan_dd_trunc = plan_dd[loop_closure_index:,:]
+            #print 'after,',plan_dd
+            plan_theta_trunc = plan_theta[loop_closure_index:,:]
+
+        return plan_dd_trunc, plan_theta_trunc, closure_count
+
 
 
     def cal_entropy_shannon(self, num_unknown):
-            # Shannon's entropy of one cell
-            H_shannon_one = - ( self.p_occpu*math.log(self.p_occpu,2) + (1-self.p_occpu)*math.log((1-self.p_occpu),2) ) 
-            # total Shannon's entrooy
-            entropy_shannon = num_unknown * H_shannon_one 
-            return entropy_shannon  
+        # Shannon's entropy of one cell
+        H_shannon_one = - ( self.p_occpu*math.log(self.p_occpu,2) + (1-self.p_occpu)*math.log((1-self.p_occpu),2) ) 
+        # total Shannon's entrooy
+        entropy_shannon = num_unknown * H_shannon_one 
+        return entropy_shannon  
 
 
     def set_plan_goal(self, center):
@@ -608,30 +650,43 @@ class DemoResetter():
         return start, goal, tolerance
 
 
-    def get_plan_trajectory(self, plan_response, plan_len):
+    def get_plan_trajectory(self, plan_response):
+        #plan_len = len(plan_response.plan.poses)
         plan_x = np.empty((len(plan_response.plan.poses),1))
         plan_y = np.empty((len(plan_response.plan.poses),1))
-        plan_w = np.empty((len(plan_response.plan.poses),1))
+        #plan_w = np.empty((len(plan_response.plan.poses),1))
         i = 0
         for plan_pose in plan_response.plan.poses:
             plan_x[i] = plan_pose.pose.position.x  #x
             plan_y[i] = plan_pose.pose.position.y  #y
-            plan_w[i] = plan_pose.pose.orientation.w  #w
+            #plan_w[i] = plan_pose.pose.orientation.w  #w
             i = i+1
-        plan_x_next = np.zeros((plan_len,1))
-        plan_x_next[0:plan_len-1] = plan_x[1:plan_len]
-        plan_x_next[plan_len-1] = plan_x[plan_len-1]
+        plan_x = plan_x[::5,:] # downsample
+        plan_y = plan_y[::5,:]
+
+        #plan_x_next = np.zeros((plan_len,1))
+        plan_x_next = np.zeros((len(plan_x),1))
+        #plan_x_next[0:plan_len-1] = plan_x[1:plan_len]
+        plan_x_next[0:len(plan_x)-1] = plan_x[1:len(plan_x)]
+        #plan_x_next[plan_len-1] = plan_x[plan_len-1]
+        plan_x_next[len(plan_x)-1] = plan_x[len(plan_x)-1]
         plan_dx = plan_x_next - plan_x
     
-        plan_y_next = np.zeros((plan_len,1))
-        plan_y_next[0:plan_len-1] = plan_y[1:plan_len]
-        plan_y_next[plan_len-1] = plan_y[plan_len-1]
+        #plan_y_next = np.zeros((plan_len,1))
+        #plan_y_next[0:plan_len-1] = plan_y[1:plan_len]
+        #plan_y_next[plan_len-1] = plan_y[plan_len-1]
+        #plan_dy = plan_y_next - plan_y
+        plan_y_next = np.zeros((len(plan_y),1))
+        plan_y_next[0:len(plan_y)-1] = plan_y[1:len(plan_y)]
+        plan_y_next[len(plan_y)-1] = plan_y[len(plan_y)-1]
         plan_dy = plan_y_next - plan_y
+
 
         plan_dd = np.sqrt(plan_dx**2 + plan_dy**2)  # displacement (delta_d)
         #print plan_dd
 
         plan_theta = np.angle(plan_dx + plan_dy*1j,deg=True)  # current heading (theta_k)
+        #print "\n",plan_x,"\n"
         return plan_dd, plan_theta, plan_x, plan_y
 
 
