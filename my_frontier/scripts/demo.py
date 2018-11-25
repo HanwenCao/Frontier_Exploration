@@ -55,6 +55,8 @@ class DemoResetter():
         print "Done!"
         self.stop = False
         self.flag_stuck=0
+        self.candidate_idx = 0
+        self.Pk_list = [np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]])]
         # rospy.Subscriber("/mobile_base/events/button", ButtonEvent, self.ButtonEventCallback)
         # rospy.Subscriber("/mobile_base/events/wheel_drop", WheelDropEvent, self.WheelDropEventCallback)
         self.initialGoals()
@@ -343,7 +345,7 @@ class DemoResetter():
 
         robot_pose_pixel[1] = (robot_pose_world[1] - origin_y) / resolution
 
-
+        
 
         # --------------------------------------------- open cells ---------------------
 
@@ -408,6 +410,7 @@ class DemoResetter():
         occup = ((grid <= thresh_high) & (grid >= thresh_low)) * 1.0
 
 
+
         # ----------------------------------------------------------------
 
         # frontier detection 
@@ -425,16 +428,18 @@ class DemoResetter():
 
         # group them!
         conected_frontier, label_num = measure.label(grid_frontier, return_num=True)
-
+        
         
         manh_dist = []  # stores distances
         cents = []  # stores centers of frontiers
         for region in regionprops(conected_frontier):
 
             # take regions with large enough areas
+            
 
-            if region.area >= 60:  # do not consider small frontier groups
+            if region.area >= 50:  # do not consider small frontier groups
                 # the centroid of each valid region
+                
                 cen_y = region.centroid[0]  # Centroid coordinate tuple (row, col)
                 cen_x = region.centroid[1]  # Centroid coordinate tuple (row, col)
                 cents.append([cen_x, cen_y])  #cents[col,row]
@@ -446,7 +451,7 @@ class DemoResetter():
       	# sort two list: centers of each frontiers according to the man_distance
         cents_sorted = [x for _,x in sorted(zip(manh_dist, cents))]   # a sorted record of all the candidate goals (close-far)
         
-
+        
 
 
         # calculate entropy of each candidates
@@ -454,7 +459,9 @@ class DemoResetter():
         raycast_num = list()
 
         for center in cents_sorted:  # in image frame
+
             num_unknown = ray_casting(size, unknown, occup, center, 80)  
+
             raycast_num.append(num_unknown) 
 
             #Shannon's entropy
@@ -465,7 +472,7 @@ class DemoResetter():
             print 'Shannon Entropy = ', entropy_shannon
  
 
-
+        
 
         print "candidates(pixel col,row): ", cents_sorted
         # pixel to world
@@ -489,6 +496,9 @@ class DemoResetter():
         candidate_num = 0
         entropy_renyi = []
 
+        Last_P = self.Pk_list[self.candidate_idx]  # read from last time
+        self.Pk_list = []
+
         for center in cents_sorted:  # in map frame, for each candidate
 
             plan_start, plan_goal, plan_tolerance = self.set_plan_goal(center)  #set up a planning goal 
@@ -498,6 +508,8 @@ class DemoResetter():
             print "plan size: %f" %(plan_len)
             if plan_len == 0:  # fail to make a plan
                 print 'cannot generate trajectory'
+                entropy_renyi.append(float('Inf'))
+
                 continue
             if plan_len > 2000:  # tune here------------------
                 print 'too long'
@@ -519,15 +531,19 @@ class DemoResetter():
             print "num of familiar pose for every candidate:\n", closure_count_list
 
             # covariance
-            P0 = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]])  # initial covariance
+            P0 = Last_P
+            if closure_count != 0:
+                P0 = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]])  # set to initial covariance, because of loop closure
+            print "P0 = ", P0
             Pk = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]]) 
             uncertainty = math.sqrt(np.linalg.det(P0))
             #print 'initial ucertainty: ', uncertainty
 
             # propogate
             Pk = self.covariance( P0, Pk, plan_dd_trunc, plan_theta_trunc)
+            self.Pk_list.append(Pk)
+
             #predicted uncertainty
-            #print(Pk)
             uncertainty = math.sqrt(np.linalg.det(Pk))
             print 'final ucertainty: ', uncertainty
 
@@ -542,8 +558,18 @@ class DemoResetter():
             candidate_num = candidate_num + 1
 
         utility = np.asarray(entropy_shannon) - np.asarray(entropy_renyi)
+
+        # stop condition
+        if utility.size==0:
+            print "finish!"
+            exit()
+
         print "Utility of each candidate: ", utility
-        print 'max index:',np.argmax(utility)
+        self.candidate_idx = np.argmax(utility)
+        print 'max index:', self.candidate_idx
+        print "Pk of each candidate: ", self.Pk_list
+
+        
 
 
         
@@ -561,7 +587,7 @@ class DemoResetter():
             #cent_rand = sample(cents_sorted,  1)
              # assume there are more than 4 frontiers
             print "try another goal!!"
-            next_goal_world = cents_sorted[random.randint(1,3)] # try a random frontier if get stuck into the closest one
+            next_goal_world = cents_sorted[random.randint(1,utility.size-1)] # try a random frontier if get stuck into the closest one
             self.flag_stuck=0
        
 		
@@ -706,16 +732,26 @@ def angle_points(p1, robot):  # calculation based on index
 
 
 def ray_casting(size, unknown, occup, cent, laser_range):
-    start = datetime.datetime.now()
-    robot = [0,0]
-    robot[0] = int(cent[1]) #robot[row,col]
+    print cent
+    #start = timeit.default_timer()
+    robot = [0, 0]
+    robot[0] = int(cent[1])  # robot[row,col]
     robot[1] = int(cent[0])
+    
+    occup_index = np.transpose(np.nonzero(occup)) # (row,col)
+    occpu_disttorobot = np.linalg.norm(occup_index - robot, axis=1)
+    outrage_idx = occup_index[occpu_disttorobot>laser_range]
+    occup[outrage_idx[:,0], outrage_idx[:,1]] = 0
+    
     # -----------------------------------------------------
     # special situation: angle=0
-    exist_right_obstacle = list()  # initialize flag
-    for col in range(robot[1] + 1, size[1]):
-        if occup[robot[0], col] == 1:
-            exist_right_obstacle.append(col)  # set the flag (there exist obstacle cell on the right of robot)
+    #exist_right_obstacle = list()  # initialize flag
+    #for col in range(robot[1] + 1, size[1]):
+    #    if occup[robot[0], col] == 1:
+    #        exist_right_obstacle.append(col)  # set the flag (there exist obstacle cell on the right of robot)
+    exist_right_obstacle = 0
+    if np.count_nonzero(occup[robot[0], robot[1]+1:robot[1]+laser_range]) != 0:
+        exist_right_obstacle = 1;
 
     # the closest "right" obstacle is at (robot[0], exist_right_obstacle)
     # if exist_right_obstacle = 0, then there is no such situation
