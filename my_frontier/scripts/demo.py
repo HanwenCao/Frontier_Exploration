@@ -130,7 +130,7 @@ class DemoResetter():
 
     def Rotate(self):	
         #get orientation
-        print "rotate to get a whole view1"
+        print "look around 1"
         #orientation_z = self.odom[2] #read current orientation
         #orientation_w = self.odom[3]
         #set a rotation goal
@@ -141,7 +141,7 @@ class DemoResetter():
         goal_rot.orientation.w = 1#1-orientation_w
         self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
 
-        print "rotate to get a whole view2"
+        print "look around 2"
         #get orientation
         #orientation_z = self.odom[2] #read current orientation
         #orientation_w = self.odom[3]
@@ -153,7 +153,7 @@ class DemoResetter():
         goal_rot.orientation.w = math.cos(math.pi/4)#1-orientation_w
         self.navigateToGoal(goal_pose=goal_rot)    # rotate 90'
 
-        print "rotate to get a whole view3"
+        print "look around 3"
         #set a rotation goal
         goal_rot = Pose()
         goal_rot.position.x = self.odom[0]  #read current odom
@@ -162,7 +162,8 @@ class DemoResetter():
         goal_rot.orientation.w = 0
         self.navigateToGoal(goal_pose=goal_rot)    # rotate 90'
 
-        print "rotate to get a whole view4"
+        print "look around 4"
+        '''
         #set a rotation goal
         goal_rot = Pose()
         goal_rot.position.x = self.odom[0]  #read current odom
@@ -171,7 +172,7 @@ class DemoResetter():
         goal_rot.orientation.w = -math.cos(math.pi/4)#1-orientation_w
         self.navigateToGoal(goal_pose=goal_rot)    # rotate 180'
         
-        print "rotate to get a whole view5"
+        print "look around 5"
         #set a rotation goal
         goal_rot = Pose()
         goal_rot.position.x = self.odom[0]    #read current odom
@@ -179,6 +180,7 @@ class DemoResetter():
         goal_rot.orientation.z = 0#orientation_w
         goal_rot.orientation.w = 1#1-orientation_w
         self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
+        '''
 
 
 
@@ -186,12 +188,12 @@ class DemoResetter():
         #d_d : delta_d (odometry reading: translation)
         #theta_k : theta_k (current heading)
         i=0
-        a = 1.5
+        a = 1.5  # tuning here
         V = a*np.array([[0.05**2, 0],[0, math.radians(0.5)**2]])  # odom noise variance, with standard deviation 5cm and 0.5 degree
         
         for dd in d_d:
             theta = theta_k[i]
-            Fx = np.array([[1,0,-dd*math.sin(theta)],[0,1,dd*math.cos(theta)],[0,0,1]])  #jacobian matrix
+            Fx =  np.array([[1,0,-dd*math.sin(theta)],[0,1,dd*math.cos(theta)],[0,0,1]])  #jacobian matrix
             Fv = np.array([[math.cos(theta), 0],[math.sin(theta), 0],[0,1]])
 
             Pk = np.dot(np.dot(Fx, P0), np.transpose(Fx)) + np.dot(np.dot(Fv, V), np.transpose(Fv))
@@ -467,7 +469,7 @@ class DemoResetter():
             #Shannon's entropy
             entropy_shannon_i = self.cal_entropy_shannon(num_unknown)  # shannon's entropy at this location
     
-            entropy_shannon.append(entropy_shannon_i)    # laser range = 4m
+            entropy_shannon.append(entropy_shannon_i)    
 
             print 'Shannon Entropy = ', entropy_shannon
  
@@ -476,6 +478,9 @@ class DemoResetter():
 
         print "candidates(pixel col,row): ", cents_sorted
         # pixel to world
+        resolution = self.p0[3] # update map info
+        origin_x = self.p0[0]
+        origin_y = self.p0[1]
         for ele in cents_sorted:
             ele[0] = ele[0] * resolution + origin_x
             ele[1] = ele[1] * resolution + origin_y
@@ -587,8 +592,9 @@ class DemoResetter():
             #cent_rand = sample(cents_sorted,  1)
              # assume there are more than 4 frontiers
             print "try another goal!!"
-            next_goal_world = cents_sorted[random.randint(1,utility.size-1)] # try a random frontier if get stuck into the closest one
             self.flag_stuck=0
+            next_goal_world = cents_sorted[random.randint(1,2)] # try a random frontier if get stuck into the closest one
+            
        
 		
         # transform into real world
@@ -604,7 +610,7 @@ class DemoResetter():
 
     def RenyiEntropy(self, uncertainty, num_cell_seen): 
         # Renyi's entropy
-        alpha = 1 + 1/uncertainty
+        alpha = 1 + 1/(uncertainty*2) # tuning here
         H_renyi_one = (1/(1-alpha)) * math.log((self.p_occpu**alpha + (1-self.p_occpu)**alpha), 2)
         entropy_renyi_i = H_renyi_one * num_cell_seen
         return entropy_renyi_i
@@ -732,7 +738,7 @@ def angle_points(p1, robot):  # calculation based on index
 
 
 def ray_casting(size, unknown, occup, cent, laser_range):
-    print cent
+    print "frontier(pixel) = ",cent
     #start = timeit.default_timer()
     robot = [0, 0]
     robot[0] = int(cent[1])  # robot[row,col]

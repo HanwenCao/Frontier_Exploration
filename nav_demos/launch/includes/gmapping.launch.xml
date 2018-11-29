@@ -1,5 +1,5 @@
 <launch>
   <include file="$(find turtlebot_gazebo)/launch/gmapping_demo.launch"/>
-    
+    <param name="/slam_gmapping/minimumScore" value="400" />
     
 </launch>
