@@ -162,8 +162,8 @@ class DemoResetter():
         goal_rot.orientation.w = 0
         self.navigateToGoal(goal_pose=goal_rot)    # rotate 90'
 
-        print "look around 4"
         '''
+        print "look around 4"
         #set a rotation goal
         goal_rot = Pose()
         goal_rot.position.x = self.odom[0]  #read current odom
@@ -269,7 +269,7 @@ class DemoResetter():
 
         goal.target_pose.header.stamp = rospy.Time.now()
 
-        goal.target_pose.header.frame_id = "odom"  #odom,  map
+        goal.target_pose.header.frame_id = "map"  #odom,  map
 
 
 
@@ -610,7 +610,7 @@ class DemoResetter():
 
     def RenyiEntropy(self, uncertainty, num_cell_seen): 
         # Renyi's entropy
-        alpha = 1 + 1/(uncertainty*2) # tuning here
+        alpha = 1 + 1/(uncertainty*1.5) # tuning here
         H_renyi_one = (1/(1-alpha)) * math.log((self.p_occpu**alpha + (1-self.p_occpu)**alpha), 2)
         entropy_renyi_i = H_renyi_one * num_cell_seen
         return entropy_renyi_i
