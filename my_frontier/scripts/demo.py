@@ -97,7 +97,7 @@ class DemoResetter():
 
 
     def callback_entropy_gmapping(self, data):
-        print 'pose entropy estimated by gmapping: ', data.data
+        #print 'pose entropy estimated by gmapping: ', data.data
         self.pose_entropy_gmapping = data.data
 
 
@@ -123,8 +123,10 @@ class DemoResetter():
         goalB = Pose()   # goalB is next frontier
         goalB.position.x = next_x
         goalB.position.y = next_y
-        goalB.orientation.z = self.odom[2]
-        goalB.orientation.w = self.odom[3]
+        #goalB.orientation.z = self.odom[2]
+        goalB.orientation.z = random.uniform(0, 1)
+        #goalB.orientation.w = self.odom[3]
+        goalB.orientation.w = math.sqrt(1-goalB.orientation.z**2)
         self.goals[1] = goalB 
         #print "exploration goal is set!"
 
@@ -478,9 +480,9 @@ class DemoResetter():
 
         print "candidates(pixel col,row): ", cents_sorted
         # pixel to world
-        resolution = self.p0[3] # update map info
-        origin_x = self.p0[0]
-        origin_y = self.p0[1]
+        #resolution = self.p0[3] # update map info
+        #origin_x = self.p0[0]
+        #origin_y = self.p0[1]
         for ele in cents_sorted:
             ele[0] = ele[0] * resolution + origin_x
             ele[1] = ele[1] * resolution + origin_y
@@ -516,7 +518,7 @@ class DemoResetter():
                 entropy_renyi.append(float('Inf'))
 
                 continue
-            if plan_len > 2000:  # tune here------------------
+            if plan_len > 2000:  
                 print 'too long'
                 #continue
 
@@ -533,13 +535,13 @@ class DemoResetter():
 
             #print 'for this candidate traj, the number of familiar pose is ', closure_count
             closure_count_list.append(closure_count)  # for different candidates, larger values means more familiar poses            
-            print "num of familiar pose for every candidate:\n", closure_count_list
+            #print "num of familiar pose for every candidate:\n", closure_count_list
 
             # covariance
             P0 = Last_P
             if closure_count != 0:
                 P0 = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]])  # set to initial covariance, because of loop closure
-            print "P0 = ", P0
+            #print "P0 = ", P0
             Pk = np.array([[0.1,0,0],[0,0.1,0],[0,0,0.05]]) 
             uncertainty = math.sqrt(np.linalg.det(P0))
             #print 'initial ucertainty: ', uncertainty
@@ -550,7 +552,7 @@ class DemoResetter():
 
             #predicted uncertainty
             uncertainty = math.sqrt(np.linalg.det(Pk))
-            print 'final ucertainty: ', uncertainty
+            #print 'final ucertainty: ', uncertainty
 
             num_cell_seen = raycast_num[candidate_num]
 
@@ -572,7 +574,7 @@ class DemoResetter():
         print "Utility of each candidate: ", utility
         self.candidate_idx = np.argmax(utility)
         print 'max index:', self.candidate_idx
-        print "Pk of each candidate: ", self.Pk_list
+        #print "Pk of each candidate: ", self.Pk_list
 
         
 
@@ -586,7 +588,7 @@ class DemoResetter():
             next_goal_world = cents_sorted[ entropy_shannon.index(max(entropy_shannon)) ] # max info-gain frontier
             next_goal_world = cents_sorted[ closure_count_list.index(max(closure_count_list)) ] # zigzag frontier
             next_goal_world = cents_sorted[ np.argmax(utility) ] # max utility
-            print "try the max-info-gain goal!!"
+            print "try the max-utility goal!!"
         if self.flag_stuck==1:
             #next_goal_pixel = cents_sorted[1] # try a further frontier if get stuck into the closest one
             #cent_rand = sample(cents_sorted,  1)
@@ -610,7 +612,7 @@ class DemoResetter():
 
     def RenyiEntropy(self, uncertainty, num_cell_seen): 
         # Renyi's entropy
-        alpha = 1 + 1/(uncertainty*1.5) # tuning here
+        alpha = 1 + 1/(uncertainty*1.2) # tuning here
         H_renyi_one = (1/(1-alpha)) * math.log((self.p_occpu**alpha + (1-self.p_occpu)**alpha), 2)
         entropy_renyi_i = H_renyi_one * num_cell_seen
         return entropy_renyi_i
@@ -738,7 +740,7 @@ def angle_points(p1, robot):  # calculation based on index
 
 
 def ray_casting(size, unknown, occup, cent, laser_range):
-    print "frontier(pixel) = ",cent
+    
     #start = timeit.default_timer()
     robot = [0, 0]
     robot[0] = int(cent[1])  # robot[row,col]

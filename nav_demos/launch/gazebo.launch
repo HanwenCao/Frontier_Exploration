@@ -1,5 +1,5 @@
 <launch>
-  <arg name="world_file" default="$(find nav_demos)/worlds/fourth_floor.world"/>
+  <arg name="world_file" default="$(find nav_demos)/worlds/small_world.world"/>
   <arg name="gui" default="true"/>
 
 
