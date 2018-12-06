@@ -25,8 +25,6 @@ import tf
 from actionlib_msgs.msg import GoalStatus
 from nav_msgs.msg import Odometry
 from kobuki_msgs.msg import BumperEvent, WheelDropEvent
-import math
-import numpy as np
 #import dippykit as dip
 from skimage import measure
 from skimage.measure import label, regionprops
