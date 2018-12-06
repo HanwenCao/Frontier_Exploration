@@ -10,11 +10,9 @@ Utility-based frontier exloration.
 
 ## Prerequisites
 
-*ros kinetic
-*python 
-*numpy
-*skimage
-
+* ros kinetic
+* python
+* skimage
 
 ## Running the tests
 
