@@ -37,7 +37,7 @@ class DemoResetter():
         rospy.init_node('Prototype')
         # self.map_pub = rospy.Publisher("/map", OccupancyGrid, queue_size=1, latch=True)
         self.clear_costmap_srv = None
-        self.p_occpu = 0.1  # the probability of occpancy foe each unknown cell
+        self.p_occpu = 0.2  # the probability of occpancy foe each unknown cell (tuning)
         self.pose_entropy_gmapping = 4.377   # an initial value of ~entropy published by gmapping
         self.counter_odom = 0  
         self.poses_hist = np.array([[-99.0,-99.0,0]])
@@ -130,60 +130,6 @@ class DemoResetter():
         self.goals[1] = goalB 
         #print "exploration goal is set!"
 
-    def Rotate(self):	
-        #get orientation
-        print "look around 1"
-        #orientation_z = self.odom[2] #read current orientation
-        #orientation_w = self.odom[3]
-        #set a rotation goal
-        goal_rot = Pose()
-        goal_rot.position.x = self.odom[0]    #read current odom
-        goal_rot.position.y = self.odom[1]
-        goal_rot.orientation.z = 0#orientation_w
-        goal_rot.orientation.w = 1#1-orientation_w
-        self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
-
-        print "look around 2"
-        #get orientation
-        #orientation_z = self.odom[2] #read current orientation
-        #orientation_w = self.odom[3]
-        #set a rotation goal
-        goal_rot = Pose()
-        goal_rot.position.x = self.odom[0]  #read current odom
-        goal_rot.position.y = self.odom[1]
-        goal_rot.orientation.z = math.sin(math.pi/4)#orientation_w
-        goal_rot.orientation.w = math.cos(math.pi/4)#1-orientation_w
-        self.navigateToGoal(goal_pose=goal_rot)    # rotate 90'
-
-        print "look around 3"
-        #set a rotation goal
-        goal_rot = Pose()
-        goal_rot.position.x = self.odom[0]  #read current odom
-        goal_rot.position.y = self.odom[1]
-        goal_rot.orientation.z = 1
-        goal_rot.orientation.w = 0
-        self.navigateToGoal(goal_pose=goal_rot)    # rotate 90'
-
-        '''
-        print "look around 4"
-        #set a rotation goal
-        goal_rot = Pose()
-        goal_rot.position.x = self.odom[0]  #read current odom
-        goal_rot.position.y = self.odom[1]
-        goal_rot.orientation.z = math.sin(math.pi/4)#orientation_w
-        goal_rot.orientation.w = -math.cos(math.pi/4)#1-orientation_w
-        self.navigateToGoal(goal_pose=goal_rot)    # rotate 180'
-        
-        print "look around 5"
-        #set a rotation goal
-        goal_rot = Pose()
-        goal_rot.position.x = self.odom[0]    #read current odom
-        goal_rot.position.y = self.odom[1]
-        goal_rot.orientation.z = 0#orientation_w
-        goal_rot.orientation.w = 1#1-orientation_w
-        self.navigateToGoal(goal_pose=goal_rot)    # theta=0 # rotate 90'
-        '''
-
 
 
     def covariance(self, P0, Pk, d_d, theta_k):
@@ -227,13 +173,12 @@ class DemoResetter():
 
     def navigate(self):
 
-        #self.Rotate()
         while not rospy.is_shutdown():   
             if not self.stop:
 
 
                 try:
-                    #self.Rotate()
+                    
                     np.savetxt("history.txt", self.poses_hist, fmt='%f');
                     self.getcurrentpose()
                     next_goal = self.process(info=self.p0, grid=self.rawmap, odom=self.pose_map)  # in map frame                  
@@ -484,7 +429,7 @@ class DemoResetter():
     
             entropy_shannon.append(entropy_shannon_i)    
 
-            print 'Shannon Entropy = ', entropy_shannon
+            #print 'Shannon Entropy = ', entropy_shannon
 
 
 
@@ -572,7 +517,7 @@ class DemoResetter():
             
             entropy_renyi.append(entropy_renyi_i)
 
-            print 'Renyi Entropy: ', entropy_renyi
+            #print 'Renyi Entropy: ', entropy_renyi
             candidate_num = candidate_num + 1
 
         utility = np.asarray(entropy_shannon) - np.asarray(entropy_renyi)
