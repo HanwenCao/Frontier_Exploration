@@ -2,6 +2,12 @@
 
 Utility-based frontier exloration.
 
+## Video
+https://www.youtube.com/watch?v=YpDb5tQewAs
+https://www.youtube.com/watch?v=MQJ5M0dEo20
+https://www.youtube.com/watch?v=X4mQs9AEAl8
+
+
 ## Getting Started
 
 * Clone or download to local workspace and build them.
