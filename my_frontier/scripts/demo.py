@@ -685,14 +685,18 @@ class DemoResetter():
         dif_y = -(p1[0] - p2[0])
         dif_x = p1[1] - p2[1]
         ang = np.arctan2(dif_y, dif_x)
-        return np.rad2deg(ang % (2 * np.pi))
+        deg = np.rad2deg(ang % (2 * np.pi))
+       	deg = deg.astype(int)
+        return deg
 
 
     def angle_points(self, p1, robot):  # calculation based on index
         dif_yx = p1 - robot
         dif_yx[:,0] = - dif_yx[:,0]
         ang = np.arctan2(dif_yx[:,0], dif_yx[:,1])
-        return np.rad2deg(ang % (2 * np.pi))
+        deg = np.rad2deg(ang % (2 * np.pi))
+    	deg = deg.astype(int)
+        return deg
 
 
     def ray_casting(self, size, unknown, occup, cent, laser_range):
@@ -832,15 +836,20 @@ class DemoResetter():
             agr = angle_range[i]  # angle range of this obstacle
             #print 'obstacle i=', i
             #print 'range=', agr
-
-            unknown_angle_obs_i = unknown_angle[ (unknown_angle>=agr[0]) & (unknown_angle<=agr[1]) ]
-            unknown_dist_obs_i = unknown_dist[ (unknown_angle>=agr[0]) & (unknown_angle<=agr[1]) ]
-            unknown_index_obs_i = unknown_index_inrange[ (unknown_angle>=agr[0]) & (unknown_angle<=agr[1]) ]
+            index_anglerange = (unknown_angle >= agr[0]) & (unknown_angle <= agr[1])
+            unknown_angle_obs_i = unknown_angle[ index_anglerange ]
+            unknown_dist_obs_i = unknown_dist[ index_anglerange ]
+            unknown_index_obs_i = unknown_index_inrange[ index_anglerange ]
             dist_closest_obs = list()
 
 
             for ele in unknown_angle_obs_i:  # if the angle range of obstacle i is large, then this loop is slow
-                angle_closest_obs = min(angle[i], key=lambda x: abs(x - ele))
+                #angle_closest_obs = min(angle[i], key=lambda x: abs(x - ele))
+                whe = np.where(angle[i]==ele)  # try searching
+                if whe[0].size != 0:   #there is occupied cell who has the same angle with the given unknown cell
+                	angle_closest_obs = ele
+            	else:
+                	angle_closest_obs = min(angle[i], key=lambda x: abs(x - ele))##
                 ind = angle[i].index(angle_closest_obs)
                 dist_closest_obs.append(dist[i][ind])
 
