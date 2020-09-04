@@ -18,8 +18,7 @@ https://www.youtube.com/watch?v=X4mQs9AEAl8
 
 ## Prerequisites
 
-* ros kinetic
-* python
+* tested with ros kinetic
 * skimage
 
 ## Running the tests
